@@ -96,6 +96,7 @@ import { openWeatherPlugin } from "@elizaos/plugin-open-weather";
 import { stargazePlugin } from "@elizaos/plugin-stargaze";
 import { akashPlugin } from "@elizaos/plugin-akash";
 import { quaiPlugin } from "@elizaos/plugin-quai";
+import { payaiPlugin } from "@elizaos/plugin-payai";
 import Database from "better-sqlite3";
 import fs from "fs";
 import net from "net";
@@ -854,6 +855,7 @@ export async function createAgent(
             getSecret(character, "QUAI_PRIVATE_KEY")
                 ? quaiPlugin
                 : null,
+            payaiPlugin,
         ].filter(Boolean),
         providers: [],
         actions: [],

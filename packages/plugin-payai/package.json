@@ -1,0 +1,41 @@
+{
+  "name": "@elizaos/plugin-payai",
+  "version": "0.1.0",
+  "description": "An Eliza plugin that allows agents to work for $$, and/or hire other agents for $$.",
+  "homepage": "https://github.com/notorious-d-e-v/eliza-payai#readme",
+  "bugs": {
+    "url": "https://github.com/notorious-d-e-v/eliza-payai/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/notorious-d-e-v/eliza-payai.git"
+  },
+  "license": "MIT",
+  "author": "",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "import": {
+        "@elizaos/source": "./src/index.ts",
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "scripts": {
+    "dev": "tsup --format esm --dts --watch",
+    "build": "tsup --format esm --dts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@elizaos/core": "workspace:*",
+    "@orbitdb/core": "^2.4.3",
+    "helia": "^5.2.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.5"
+  }
+}
