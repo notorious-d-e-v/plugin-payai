@@ -1,5 +1,5 @@
 import type { Plugin } from "@elizaos/core";
-import { PayAIClient } from "./client";
+import { payAIClient } from "./client.ts";
 
 export const payaiPlugin: Plugin = {
     name: "payai",
@@ -8,7 +8,7 @@ export const payaiPlugin: Plugin = {
     evaluators: [],
     providers: [],
     services: [],
-    clients: [PayAIClient]
+    clients: [payAIClient]
 };
 
 export default payaiPlugin;

@@ -10,6 +10,7 @@ export default defineConfig({
         "dotenv", // Externalize dotenv to prevent bundling
         "fs", // Externalize fs to use Node.js built-in module
         "path", // Externalize other built-ins if necessary
+        "@libp2p",
         // Add other modules you want to externalize
     ],
 });

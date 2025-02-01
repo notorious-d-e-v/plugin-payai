@@ -31,8 +31,11 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
+    "@chainsafe/libp2p-gossipsub": "^14.1.0",
     "@elizaos/core": "workspace:*",
     "@orbitdb/core": "^2.4.3",
+    "blockstore-fs": "^2.0.2",
+    "datastore-level": "^11.0.1",
     "helia": "^5.2.0"
   },
   "devDependencies": {
