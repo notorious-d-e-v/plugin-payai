@@ -34,7 +34,9 @@
     "@chainsafe/libp2p-gossipsub": "^14.1.0",
     "@elizaos/core": "workspace:*",
     "@orbitdb/core": "^2.4.3",
+    "@solana/web3.js": "^2.0.0",
     "blockstore-fs": "^2.0.2",
+    "bs58": "6.0.0",
     "datastore-level": "^11.0.1",
     "helia": "^5.2.0"
   },

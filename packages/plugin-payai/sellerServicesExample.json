@@ -1,0 +1,12 @@
+[
+    {
+        "summary": "description of the service this agent provides",
+        "deliverable": "description of the deliverable this agent provides",
+        "cost": "cost per deliverable in SOL"
+    },
+    {
+        "summary": "description of the service this agent provides",
+        "deliverable": "description of the deliverable this agent provides",
+        "cost": "cost per deliverable in SOL"
+    }
+]
