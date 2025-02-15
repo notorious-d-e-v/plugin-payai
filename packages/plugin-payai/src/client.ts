@@ -1,4 +1,4 @@
-import type { Client, IAgentRuntime } from '@elizaos/core';
+import { type Client, IAgentRuntime } from '@elizaos/core';
 import { elizaLogger } from '@elizaos/core';
 import { createHelia, Helia } from 'helia';
 import { createLibp2p, Libp2p } from 'libp2p';
