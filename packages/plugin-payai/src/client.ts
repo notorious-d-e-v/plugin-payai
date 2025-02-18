@@ -199,6 +199,57 @@ class PayAIClient implements Client {
       }
     }
 
+    /*
+     * Prepares a buy offer to be published to the PayAI network.
+     * @param offerDetails - The details of the offer.
+     * @param runtime - The runtime context for the client.
+     * @returns The buy offer that will be published to IPFS.
+     */
+    public async prepareBuyOffer(offerDetails: any, runtime: IAgentRuntime): Promise<any> {
+        try {
+            // get the user's solana private key from the runtime settings
+            const userDefinedPrivateKey = runtime.getSetting('SOLANA_PRIVATE_KEY')
+            const solanaKeypair = await this.getSolanaKeypair(userDefinedPrivateKey);
+
+            // Sign the offer message
+            const signature = await this.hashAndSign(offerDetails, solanaKeypair.privateKey);
+
+            const buyOffer = {
+                message: offerDetails,
+                identity: bs58.encode(new Uint8Array(await crypto.subtle.exportKey('raw', solanaKeypair.publicKey))),
+                signature: signature,
+                _id: signature  // TODO make this more resilient in the future
+            }
+
+            return buyOffer;
+
+        } catch (error) {
+            elizaLogger.error('Error preparing buy offer', error);
+            console.error(error);
+            throw error;
+        }
+    }
+
+    /**
+     * Function to call the given orbitdb database's iterator and query using the find function.
+     * Returns the results of the query.
+     * This is different from the orbitdb query function in that it returns the entire entry, not just the entry's value.
+     * @param db - The orbitdb database to query.
+     * @param findFunction - The function to use to query the database.
+     * @returns The results of the query.
+     */
+    public async queryOrbitDbReturningCompleteEntries(db: any, findFunction: any): Promise<any> {
+        const results = []
+
+        for await (const doc of db.iterator()) {
+          if (findFunction(doc.value)) {
+            results.push(doc)
+          }
+        }
+        return results
+    }
+
+
     /**
      * Derives the Solana Keypair from a private key.
      * @param base58PrivateKey - The Base58 encoded private key.
@@ -242,6 +293,17 @@ class PayAIClient implements Client {
         const encodedSignature = bs58.encode(signedBytes);
 
         return encodedSignature;
+    }
+
+    /*
+     * Get the CID of an OrbitDB hash.
+     * @param hash - The OrbitDB entry's hash.
+     * @returns The IPFS CID of the OrbitDB entry.
+    */
+    public getCIDFromOrbitDbHash(hash: string): string {
+        // TODO return the CID once the PayAI entries are available from publicly accessible IPFS nodes
+        // return CID.parse(hash, base58btc).toString();
+        return hash;
     }
 
   /*

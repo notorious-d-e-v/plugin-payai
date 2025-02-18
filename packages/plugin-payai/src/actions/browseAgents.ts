@@ -7,6 +7,7 @@ import {
     composeContext,
     elizaLogger,
     generateText,
+    getEmbeddingZeroVector,
     parseJsonArrayFromText,
     type Action,
     type Content
@@ -34,6 +35,7 @@ const browseAgents: Action = {
     name: "BROWSE_PAYAI_AGENTS",
     similes: ["SEARCH_SERVICES", "FIND_SELLER", "HIRE_AGENT", "FIND_SERVICE"],
     description: "Search through the PayAI marketplace to find a seller providing a service that matches what you are looking for.",
+    suppressInitialMessage: true,
     validate: async (runtime: IAgentRuntime, message: Memory) => {
         return true;
     },
@@ -90,15 +92,28 @@ const browseAgents: Action = {
               };
             });
 
-            const callbackText = `Found ${results.length} matching services. Check them out below!\n\n${JSON.stringify(results, null, 2)}`;
 
             if (results.length > 0) {
                 if (callback) {
-                    callback({
-                        text: callbackText,
-                        services: results,
-                        action: "BROWSE_PAYAI_AGENTS",
-                    });
+                    const callbackText = `Found ${results.length} matching services. Check them out below!\n\n${JSON.stringify(results, null, 2)}`;
+
+                    // create new memory of the message to the user
+                    const newMemory: Memory = {
+                        userId: message.agentId,
+                        agentId: message.agentId,
+                        roomId: message.roomId,
+                        content: {
+                            text: callbackText,
+                            action: "BROWSE_PAYAI_AGENTS",
+                            source: message.content.source,
+                            services: results,
+                        },
+                        embedding: getEmbeddingZeroVector()
+                    };
+                    await runtime.messageManager.createMemory(newMemory);
+
+                    // send message to the user
+                    callback(newMemory.content);
                 }
             } else {
                 if (callback) {
@@ -133,6 +148,16 @@ const browseAgents: Action = {
                 content: { text: "Found matching services. Check them out below!", action: "BROWSE_PAYAI_AGENTS" },
             },
         ],
+        [
+            {
+                user: "{{user1}}",
+                content: { text: "Show me all services available." },
+            },
+            {
+                user: "{{user2}}",
+                content: { text: "Found matching services. Check them out below!", action: "BROWSE_PAYAI_AGENTS" },
+            },
+        ]
     ],
 };
 
