@@ -16,7 +16,7 @@ import {
     getEmbeddingZeroVector,
 } from '@elizaos/core';
 import { payAIClient } from '../client';
-
+import { getCIDFromOrbitDbHash, prepareBuyOffer, queryOrbitDbReturningCompleteEntries } from '../utils';
 
 interface OfferDetails {
     sellerServicesCID: string;
@@ -25,9 +25,8 @@ interface OfferDetails {
     wallet: string;
 }
 
-
-const extractOfferDetailsTemplate =
-`Analyze the following conversation to extract Offer Details from a buyer to a seller.
+const extractOfferDetailsTemplate = `
+Analyze the following conversation to extract Offer Details from a buyer to a seller.
 
 {{recentMessages}}
 
@@ -56,7 +55,7 @@ Make sure you recognize when a user is asking to purchase a new service.
 If you see in the message history that you recently created a purchase order for a user, and now they are asking for a new service, then you should forget the previous order that they created and help them create a new purchase order for a new service.
 
 Only return a JSON markdown block.
-`
+`;
 
 const makeOfferAction: Action = {
     name: "MAKE_OFFER",
@@ -80,8 +79,6 @@ const makeOfferAction: Action = {
             } else {
                 state = await runtime.updateRecentMessageState(state);
             }
-
-            // if this action does not have all the required data, ask the user for it and return false
 
             const makeOfferContext = composeContext({
                 state,
@@ -111,13 +108,10 @@ const makeOfferAction: Action = {
             }
 
             // use the seller's wallet id to get the seller's services CID
-            const sellerServicesCIDs = await payAIClient
-                .queryOrbitDbReturningCompleteEntries(
-                    payAIClient.serviceAdsDB,
-                    (doc: any) => {
-                        return (doc.message.identity === extractedDetails.result.wallet);
-                    }
-                );
+            const sellerServicesCIDs = await queryOrbitDbReturningCompleteEntries(
+                payAIClient.serviceAdsDB,
+                (doc: any) => doc.message.identity === extractedDetails.result.wallet
+            );
             elizaLogger.debug("Services provided by the desired seller: ", sellerServicesCIDs);
             if (sellerServicesCIDs.length === 0) {
                 if (callback) {
@@ -137,12 +131,12 @@ const makeOfferAction: Action = {
             };
 
             // prepare the offer message
-            const buyOffer = await payAIClient.prepareBuyOffer(offerDetails, runtime);
+            const buyOffer = await prepareBuyOffer(offerDetails, runtime);
 
             // Publish the offer to IPFS
             elizaLogger.debug("Publishing buy offer to IPFS:", buyOffer);
             const result = await payAIClient.buyOffersDB.put(buyOffer);
-            const CID = payAIClient.getCIDFromOrbitDbHash(result);
+            const CID = getCIDFromOrbitDbHash(result);
             elizaLogger.info("Published Buy Offer to IPFS: ", CID);
 
             // TODO Notify the seller agent of the offer using lib2p2 or other communication channels in the future
@@ -174,10 +168,10 @@ const makeOfferAction: Action = {
 
         } catch (error) {
             elizaLogger.error('Error in MAKE_OFFER handler:', error);
+            console.error(error);
             if (callback) {
                 callback({
                     text: "Error processing MAKE_OFFER request.",
-                    error: "Error processing MAKE_OFFER request.",
                     action: "MAKE_OFFER",
                     source: message.content.source,
                 });
