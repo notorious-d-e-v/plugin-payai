@@ -31,17 +31,31 @@ const extractOfferDetailsTemplate =
 
 {{recentMessages}}
 
-Return a JSON object containing only the fields where information was clearly found:
+Return a JSON object containing only the fields where information was clearly found.
+For example:
 {
-    "wallet": "Solana public key of the seller",
-    "desiredServiceID": "ID of the service the buyer wants to purchase",
-    "desiredUnitAmount": "Amount of units the buyer wants to purchase"
+    "success": true,
+    "result": {
+        "wallet": "Solana public key of the seller",
+        "desiredServiceID": "ID of the service the buyer wants to purchase",
+        "desiredUnitAmount": "Amount of units the buyer wants to purchase"
+    }
 }
 
 If the buyer provided the seller's identity or wallet in the conversation, then set the wallet field to equal the seller's identity or wallet.
 If the buyer provided the service ID or amount of units in the conversation, then set the desiredServiceID or desiredUnitAmount fields to equal the service ID or amount of units.
 
-Only return a JSON markdown block. Set the values of fields to empty strings if information was unclear.
+If not all information was provided, or the information was unclear, then set the "success" field to false and set the result to a string asking the user to provide the missing information.
+For example, if you could only find the seller's wallet or identity, then return:
+{
+    "success": false,
+    "result": "Please provide the service ID, and the amount of units you want to purchase."
+}
+
+Make sure you recognize when a user is asking to purchase a new service.
+If you see in the message history that you recently created a purchase order for a user, and now they are asking for a new service, then you should forget the previous order that they created and help them create a new purchase order for a new service.
+
+Only return a JSON markdown block.
 `
 
 const makeOfferAction: Action = {
@@ -84,11 +98,13 @@ const makeOfferAction: Action = {
             const extractedDetails = parseJSONObjectFromText(extractedDetailsText);
 
             // Validate offer details
-            if (!extractedDetails.wallet || !extractedDetails.desiredServiceID || !extractedDetails.desiredUnitAmount) {
+            if (extractedDetails.success === false) {
                 elizaLogger.info("Need more information from the user to make an offer.");
                 if (callback) {
                     callback({
-                        text: "Please provide the seller's identity, the service ID, and the amount of units you want to purchase."
+                        text: extractedDetails.result,
+                        action: "MAKE_OFFER",
+                        source: message.content.source,
                     });
                 }
                 return false;
@@ -99,7 +115,7 @@ const makeOfferAction: Action = {
                 .queryOrbitDbReturningCompleteEntries(
                     payAIClient.serviceAdsDB,
                     (doc: any) => {
-                        return (doc.message.identity === extractedDetails.wallet);
+                        return (doc.message.identity === extractedDetails.result.wallet);
                     }
                 );
             elizaLogger.debug("Services provided by the desired seller: ", sellerServicesCIDs);
@@ -115,9 +131,9 @@ const makeOfferAction: Action = {
             // create an offer
             const offerDetails: OfferDetails = {
                 sellerServicesCID: sellerServicesCIDs[0].hash,
-                desiredServiceID: extractedDetails.desiredServiceID,
-                desiredUnitAmount: extractedDetails.desiredUnitAmount,
-                wallet: extractedDetails.wallet,
+                desiredServiceID: extractedDetails.result.desiredServiceID,
+                desiredUnitAmount: extractedDetails.result.desiredUnitAmount,
+                wallet: extractedDetails.result.wallet,
             };
 
             // prepare the offer message
