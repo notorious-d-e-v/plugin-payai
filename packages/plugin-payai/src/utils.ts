@@ -1,6 +1,11 @@
 import { createHash } from 'crypto';
 import bs58 from 'bs58';
-import { signBytes, createKeyPairFromPrivateKeyBytes, KeyPairSigner } from '@solana/web3.js';
+import {
+    signBytes,
+    createKeyPairFromPrivateKeyBytes,
+    verifySignature,
+    SignatureBytes
+} from '@solana/web3.js';
 import { IAgentRuntime } from '@elizaos/core';
 
 /**
@@ -23,6 +28,28 @@ export async function getSolanaKeypair(base58PrivateKey: string): Promise<Crypto
     return { privateKey, publicKey };
 }
 
+export async function getCryptoKeyFromBase58PublicKey(base58EncodedPublicKey: string): Promise<CryptoKey> {
+    const publicKeyBytes = bs58.decode(base58EncodedPublicKey);
+
+    const publicKey = await crypto.subtle.importKey(
+        'raw',
+        publicKeyBytes,
+        { name: 'Ed25519', namedCurve: 'Ed25519' },
+        true,
+        ['verify']
+    );
+
+    return publicKey;
+}
+
+function prepareMessageForHashing(message: object): string {
+    // serialize the message
+    const serializedMessage = JSON.stringify(message);
+
+    // strip the message of any whitespace before hashing
+    return serializedMessage.replace(/\s/g, '');
+}
+
 /**
  * Hashes and signs a message using a Solana Keypair.
  * The message is serialized to a string before hashing.
@@ -34,10 +61,10 @@ export async function getSolanaKeypair(base58PrivateKey: string): Promise<Crypto
  */
 export async function hashAndSign(message: any, privateKey: CryptoKey): Promise<string> {
     // serialize the message
-    const serializedMessage = JSON.stringify(message);
+    const serializedMessage = prepareMessageForHashing(message);
 
     // hash the message
-    const hash = createHash('sha256').update(serializedMessage.replace(/\s/g, '')).digest();
+    const hash = createHash('sha256').update(serializedMessage).digest();
 
     // sign the hash
     const signedBytes = await signBytes(privateKey, hash);
@@ -47,6 +74,24 @@ export async function hashAndSign(message: any, privateKey: CryptoKey): Promise<
 
     return encodedSignature;
 }
+
+export async function verifyMessage(identity: string, signature: string, message: object): Promise<boolean> {
+    // convert the identity from a base58 string to a CryptoKey
+    const publicKey = await getCryptoKeyFromBase58PublicKey(identity);
+
+    // serialize the message
+    const serializedMessage = prepareMessageForHashing(message);
+
+    // hash the message
+    const hash = createHash('sha256').update(serializedMessage).digest();
+
+    // decode the signature
+    const decodedSignature = bs58.decode(signature) as SignatureBytes;
+
+    // verify the signature
+    return verifySignature(publicKey, decodedSignature, hash);
+}
+
 
 /**
  * Get the CID of an OrbitDB hash.
@@ -112,12 +157,13 @@ export async function prepareServiceAd(services: any, runtime: IAgentRuntime): P
                     ...service
                 };
             }),
-            identity: bs58.encode(uint8ArrayPubkey)
+            wallet: bs58.encode(uint8ArrayPubkey)
         };
 
         const signature = await hashAndSign(message, solanaKeypair.privateKey);
         const formattedServices = {
             message,
+            identity: bs58.encode(uint8ArrayPubkey),
             signature,
             _id: signature  // TODO make this more resilient in the future
         };
@@ -126,6 +172,42 @@ export async function prepareServiceAd(services: any, runtime: IAgentRuntime): P
 
     } catch (error) {
         console.error('Error formatting sellerServices.json', error);
+        throw error;
+    }
+}
+
+/**
+ * Prepares an agreement to be published to the PayAI network.
+ * @param agreementDetails - The details of the agreement.
+ * @param runtime - The runtime context for the client.
+ * @returns The agreement that will be published to IPFS.
+ */
+export async function prepareAgreement(agreementDetails: any, runtime: IAgentRuntime): Promise<any> {
+    try {
+        // get the user's solana private key from the runtime settings
+        const userDefinedPrivateKey = runtime.getSetting('SOLANA_PRIVATE_KEY')
+        const solanaKeypair = await getSolanaKeypair(userDefinedPrivateKey);
+        const uint8ArrayPubkey = new Uint8Array(
+            await crypto.subtle.exportKey('raw', solanaKeypair.publicKey)
+        );
+
+        // prepare message using the agreement details
+        const message = {
+            ...agreementDetails,
+            identity: bs58.encode(uint8ArrayPubkey)
+        };
+
+        const signature = await hashAndSign(message, solanaKeypair.privateKey);
+        const formattedAgreement = {
+            message,
+            signature,
+            _id: signature  // TODO make this more resilient in the future
+        };
+
+        return formattedAgreement;
+
+    } catch (error) {
+        console.error('Error formatting agreement', error);
         throw error;
     }
 }

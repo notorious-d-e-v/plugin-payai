@@ -19,10 +19,9 @@ import { payAIClient } from '../client';
 import { getCIDFromOrbitDbHash, prepareBuyOffer, queryOrbitDbReturningCompleteEntries } from '../utils';
 
 interface OfferDetails {
-    sellerServicesCID: string;
+    serviceAdCID: string;
     desiredServiceID: string;
     desiredUnitAmount: string;
-    wallet: string;
 }
 
 const extractOfferDetailsTemplate = `
@@ -35,6 +34,7 @@ For example:
 {
     "success": true,
     "result": {
+        "serviceAdCID": "hash of the seller's services",
         "wallet": "Solana public key of the seller",
         "desiredServiceID": "ID of the service the buyer wants to purchase",
         "desiredUnitAmount": "Amount of units the buyer wants to purchase"
@@ -43,6 +43,7 @@ For example:
 
 If the buyer provided the seller's identity or wallet in the conversation, then set the wallet field to equal the seller's identity or wallet.
 If the buyer provided the service ID or amount of units in the conversation, then set the desiredServiceID or desiredUnitAmount fields to equal the service ID or amount of units.
+If the buyer provided the seller's service ad CID in the conversation, then set the serviceAdCID field to equal the seller's service ad CID.
 
 If not all information was provided, or the information was unclear, then set the "success" field to false and set the result to a string asking the user to provide the missing information.
 For example, if you could only find the seller's wallet or identity, then return:
@@ -107,27 +108,11 @@ const makeOfferAction: Action = {
                 return false;
             }
 
-            // use the seller's wallet id to get the seller's services CID
-            const sellerServicesCIDs = await queryOrbitDbReturningCompleteEntries(
-                payAIClient.serviceAdsDB,
-                (doc: any) => doc.message.identity === extractedDetails.result.wallet
-            );
-            elizaLogger.debug("Services provided by the desired seller: ", sellerServicesCIDs);
-            if (sellerServicesCIDs.length === 0) {
-                if (callback) {
-                    callback({
-                        text: "Could not find the seller's services. Please provide a valid seller's identity."
-                    });
-                }
-                return false;
-            }
-
             // create an offer
             const offerDetails: OfferDetails = {
-                sellerServicesCID: sellerServicesCIDs[0].hash,
+                serviceAdCID: extractedDetails.result.serviceAdCID,
                 desiredServiceID: extractedDetails.result.desiredServiceID,
-                desiredUnitAmount: extractedDetails.result.desiredUnitAmount,
-                wallet: extractedDetails.result.wallet,
+                desiredUnitAmount: extractedDetails.result.desiredUnitAmount
             };
 
             // prepare the offer message
@@ -141,7 +126,7 @@ const makeOfferAction: Action = {
 
             // TODO Notify the seller agent of the offer using lib2p2 or other communication channels in the future
 
-            let responseToUser = `Successfully made an offer for ${offerDetails.desiredUnitAmount} units of service ID ${offerDetails.desiredServiceID} from seller ${offerDetails.wallet}.`;
+            let responseToUser = `Successfully made an offer for ${offerDetails.desiredUnitAmount} units of service ID ${offerDetails.desiredServiceID} from seller ${extractedDetails.result.wallet}.`;
             responseToUser += `\nYour Buy Offer's IPFS CID is ${CID}`;
 
             if (callback) {
@@ -190,7 +175,7 @@ const makeOfferAction: Action = {
             {
                 user: "{{user2}}",
                 content: {
-                    text: "Successfully made an offer for ${offerDetails.desiredUnitAmount} units of service ID ${offerDetails.desiredServiceID} from seller ${offerDetails.wallet}.",
+                    text: "Successfully made an offer for ${offerDetails.desiredUnitAmount} units of service ID ${offerDetails.desiredServiceID} from seller ${extractedDetails.result.wallet}. Your Buy Offer's IPFS CID is bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi",
                     action: "MAKE_OFFER"
                 },
             },
@@ -239,6 +224,21 @@ const makeOfferAction: Action = {
                     action: "MAKE_OFFER"
                 },
             }
+        ],
+        [
+            {
+                user: "{{user1}}",
+                content: {
+                    text: "I want to purchase 5 units of service ID 1 from seller 9ovkK7WoiSXyEJDM5cZG3or3W95bdzZLDDHhuMgSJT9U",
+                },
+            },
+            {
+                user: "{{user2}}",
+                content: {
+                    text: "Please provide the serviceAdCID of the seller's services.",
+                    action: "MAKE_OFFER"
+                },
+            },
         ]
     ],
 };

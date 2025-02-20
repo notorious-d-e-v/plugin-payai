@@ -86,8 +86,8 @@ const browseAgents: Action = {
             // only keep the fields we want to show
             results = results.map((service: any) => {
               return {
-                hash: service.hash,
                 seller: service.value.message.identity,
+                serviceAdCID: service.hash,
                 services: service.value.message.services
               };
             });

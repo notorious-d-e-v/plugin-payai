@@ -27,6 +27,7 @@ class PayAIClient implements Client {
   private servicesConfig: any = null;
   private servicesConfigPath: string = sellerServicesFile;
   private servicesConfigInterval: NodeJS.Timeout | null = null;
+  public sellerServiceAdCID: string | null = null;
 
   constructor() {
     elizaLogger.debug('PayAI Client created');
@@ -101,20 +102,25 @@ class PayAIClient implements Client {
 
         // check if the service already exists in the serviceAdsDB
         const localServiceAd = await prepareServiceAd(localServices, runtime);
-        const fetchedServiceAds = await this.serviceAdsDB.query((doc: any) => {
-          return (
-            doc.message.identity === localServiceAd.message.identity &&
-            doc.signature === localServiceAd.signature
-          );
-        });
+        const fetchedServiceAds = await queryOrbitDbReturningCompleteEntries(
+            this.serviceAdsDB,
+            (doc: any) => {
+                return (
+                    doc.message.toString() === localServiceAd.message.toString() &&
+                    doc.signature === localServiceAd.signature
+                );
+            }
+        );
 
         // if the service does not exist in the serviceAdsDB, add it
         if (fetchedServiceAds.length === 0) {
           elizaLogger.info('Local services does not match serviceAdsDB, adding to database');
           const result = await this.serviceAdsDB.put(localServiceAd);
+          this.sellerServiceAdCID = getCIDFromOrbitDbHash(result);
           elizaLogger.info('Added new service to serviceAdsDB');
           elizaLogger.info("CID: ", CID.parse(result, base58btc).toString());
         } else {
+          this.sellerServiceAdCID = getCIDFromOrbitDbHash(fetchedServiceAds[0].hash);
           elizaLogger.info('Local services marches serviceAdsDB, no need to update the database');
         }
       }
@@ -129,6 +135,18 @@ class PayAIClient implements Client {
       }, 10000);
     }
 
+  private readAndParseServicesConfig(): any {
+    try {
+        const fileContents = fs.readFileSync(this.servicesConfigPath, 'utf-8');
+        return JSON.parse(fileContents);
+        }
+    catch (error) {
+        elizaLogger.error('Error reading sellerServices.json', error);
+        console.error(error);
+        throw error;
+    }
+  }
+
   /**
    * Checks the sellerServices.json file for updates and updates the serviceAdsDB if necessary.
    */
@@ -139,8 +157,8 @@ class PayAIClient implements Client {
         return;
       }
 
-      const fileContents = fs.readFileSync(this.servicesConfigPath, 'utf-8');
-      const parsedContents = JSON.parse(fileContents);
+      // read and parse the contents of the sellerServices.json file
+      const parsedContents = this.readAndParseServicesConfig();
 
       // contents have changed, update the serviceAdsDB
       if (JSON.stringify(this.servicesConfig) !== JSON.stringify(parsedContents)) {
@@ -148,6 +166,7 @@ class PayAIClient implements Client {
         this.servicesConfig = parsedContents;
         const serviceAd = await prepareServiceAd(this.servicesConfig, runtime);
         const result = await this.serviceAdsDB.put(serviceAd);
+        this.sellerServiceAdCID = getCIDFromOrbitDbHash(result);
         elizaLogger.info('Updated serviceAdsDB with new sellerServices.json contents');
       }
     } catch (error) {
@@ -156,6 +175,25 @@ class PayAIClient implements Client {
       throw error;
     }
   }
+
+  /*
+   * Function to get an OrbitDB entry using its hash.
+   */
+    public async getEntryFromHash(hash: string, db: any): Promise<any> {
+        try {
+            const entry = await db.log.get(hash);
+            return entry.payload.value;
+        } catch (error) {
+            elizaLogger.error('Error getting orbitdb entry from hash', error);
+            throw error;
+        }
+    }
+
+    // TODO this will change once PayAI content is available from publicly accessible IPFS nodes
+    /* Function to get an OrbitDB entry using its ipfs CID. */
+    public async getEntryFromCID(cid: string, db: any): Promise<any> {
+        return this.getEntryFromHash(cid, db);
+    }
 
   /*
    * Close the OrbitDB databases.
