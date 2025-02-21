@@ -10,7 +10,7 @@ import { libp2pOptions } from './config/libp2p';
 import { dataDir, sellerServicesFile } from './datadir';
 import bootstrapConfig from './config/bootstrap.json'
 import fs from 'fs';
-import { getSolanaKeypair, hashAndSign, getCIDFromOrbitDbHash, prepareBuyOffer, queryOrbitDbReturningCompleteEntries, prepareServiceAd } from './utils';
+import { getSolanaKeypair, hashAndSign, getCIDFromOrbitDbHash, prepareBuyOffer, queryOrbitDbReturningCompleteEntries, prepareServiceAd, getBase58PublicKeyFromCryptoKey } from './utils';
 
 const {
     createHash,

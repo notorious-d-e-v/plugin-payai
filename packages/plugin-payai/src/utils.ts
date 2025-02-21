@@ -28,6 +28,11 @@ export async function getSolanaKeypair(base58PrivateKey: string): Promise<Crypto
     return { privateKey, publicKey };
 }
 
+/*
+ * Converts a Base58 encoded public key to a CryptoKey.
+ * @param base58EncodedPublicKey - The Base58 encoded public key.
+ * @returns The CryptoKey.
+ */
 export async function getCryptoKeyFromBase58PublicKey(base58EncodedPublicKey: string): Promise<CryptoKey> {
     const publicKeyBytes = bs58.decode(base58EncodedPublicKey);
 
@@ -40,6 +45,16 @@ export async function getCryptoKeyFromBase58PublicKey(base58EncodedPublicKey: st
     );
 
     return publicKey;
+}
+
+/*
+ * Converts a CryptoKey to a Base58 encoded public key.
+ * @param publicKey - The CryptoKey to convert.
+ * @returns The Base58 encoded public key.
+ */
+export async function getBase58PublicKeyFromCryptoKey(publicKey: CryptoKey): Promise<string> {
+    const publicKeyBytes = await crypto.subtle.exportKey('raw', publicKey);
+    return bs58.encode(new Uint8Array(publicKeyBytes));
 }
 
 function prepareMessageForHashing(message: object): string {
@@ -121,7 +136,7 @@ export async function prepareBuyOffer(offerDetails: any, runtime: IAgentRuntime)
 
         const buyOffer = {
             message: offerDetails,
-            identity: bs58.encode(new Uint8Array(await crypto.subtle.exportKey('raw', solanaKeypair.publicKey))),
+            identity: await getBase58PublicKeyFromCryptoKey(solanaKeypair.publicKey),
             signature: signature,
             _id: signature  // TODO make this more resilient in the future
         }
@@ -145,9 +160,7 @@ export async function prepareServiceAd(services: any, runtime: IAgentRuntime): P
         // get the user's solana private key from the runtime settings
         const userDefinedPrivateKey = runtime.getSetting('SOLANA_PRIVATE_KEY')
         const solanaKeypair = await getSolanaKeypair(userDefinedPrivateKey);
-        const uint8ArrayPubkey = new Uint8Array(
-            await crypto.subtle.exportKey('raw', solanaKeypair.publicKey)
-        );
+        const base58PublicKey = await getBase58PublicKeyFromCryptoKey(solanaKeypair.publicKey);
 
         // prepare message using the sellerServices.json file
         const message = {
@@ -157,13 +170,13 @@ export async function prepareServiceAd(services: any, runtime: IAgentRuntime): P
                     ...service
                 };
             }),
-            wallet: bs58.encode(uint8ArrayPubkey)
+            wallet: base58PublicKey
         };
 
         const signature = await hashAndSign(message, solanaKeypair.privateKey);
         const formattedServices = {
             message,
-            identity: bs58.encode(uint8ArrayPubkey),
+            identity: base58PublicKey,
             signature,
             _id: signature  // TODO make this more resilient in the future
         };
@@ -187,14 +200,12 @@ export async function prepareAgreement(agreementDetails: any, runtime: IAgentRun
         // get the user's solana private key from the runtime settings
         const userDefinedPrivateKey = runtime.getSetting('SOLANA_PRIVATE_KEY')
         const solanaKeypair = await getSolanaKeypair(userDefinedPrivateKey);
-        const uint8ArrayPubkey = new Uint8Array(
-            await crypto.subtle.exportKey('raw', solanaKeypair.publicKey)
-        );
+        const base58PublicKey = await getBase58PublicKeyFromCryptoKey(solanaKeypair.publicKey);
 
         // prepare message using the agreement details
         const message = {
             ...agreementDetails,
-            identity: bs58.encode(uint8ArrayPubkey)
+            identity: base58PublicKey
         };
 
         const signature = await hashAndSign(message, solanaKeypair.privateKey);
