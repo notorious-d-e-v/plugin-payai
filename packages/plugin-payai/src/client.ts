@@ -1,11 +1,12 @@
 import { type Client, IAgentRuntime } from '@elizaos/core';
 import { elizaLogger } from '@elizaos/core';
 import { createHelia, Helia } from 'helia';
-import { createLibp2p, Libp2p } from 'libp2p';
+import { createLibp2p, Libp2p, Libp2pOptions } from 'libp2p';
 import { CID } from 'multiformats/cid';
 import { base58btc } from 'multiformats/bases/base58';
 import { createOrbitDB, OrbitDB, IPFSAccessController } from '@orbitdb/core';
 import { FsBlockstore } from 'blockstore-fs';
+import { LevelDatastore } from 'datastore-level'
 import { libp2pOptions } from './config/libp2p';
 import { dataDir, sellerServicesFile } from './datadir';
 import bootstrapConfig from './config/bootstrap.json'
@@ -39,16 +40,20 @@ class PayAIClient implements Client {
   public async initialize(runtime: IAgentRuntime): Promise<void> {
     try {
       elizaLogger.info('Initializing PayAI Client');
+      const agentDir = dataDir + '/' + runtime.character.name;
 
       // create libp2p instance
-      this.libp2p = await createLibp2p(libp2pOptions);
+      const libp2pDatastore: LevelDatastore = new LevelDatastore(agentDir + '/libp2p');
+      const libp2pConfig: Libp2pOptions = Object.assign({}, libp2pOptions);
+      libp2pConfig.datastore = libp2pDatastore;
+      this.libp2p = await createLibp2p(libp2pConfig);
 
       // create ipfs instance
-      const blockstore = new FsBlockstore(dataDir + '/ipfs');
+      const blockstore = new FsBlockstore(agentDir + '/ipfs');
       this.ipfs = await createHelia({ libp2p: this.libp2p, blockstore });
 
       // create orbitdb instance
-      this.orbitdb = await createOrbitDB( {ipfs: this.ipfs, directory: dataDir});
+      this.orbitdb = await createOrbitDB( {ipfs: this.ipfs, directory: agentDir});
 
       // open updates database
       this.updatesDB = await this.orbitdb.open(bootstrapConfig.databases.updates, { sync: true });

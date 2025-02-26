@@ -6,21 +6,15 @@ import { noise } from '@chainsafe/libp2p-noise'
 import { yamux } from '@chainsafe/libp2p-yamux'
 import { gossipsub } from '@chainsafe/libp2p-gossipsub'
 import { Libp2pOptions } from 'libp2p'
-import { LevelDatastore } from 'datastore-level'
 import { dataDir } from '../datadir'
 import bootstrapConfig from './bootstrap.json'
 
-/**
- * Create a new LevelDB datastore.
- */
-const datastore: LevelDatastore = new LevelDatastore(dataDir + '/libp2p');
 
 console.log("bootstrapConfig.addresses: ", bootstrapConfig.addresses);
 /**
  * A basic Libp2p configuration for Node.js nodes.
  */
 const libp2pOptions: Libp2pOptions = {
-  datastore,
   peerStore: {
     persistence: true,
     threshold: 5
