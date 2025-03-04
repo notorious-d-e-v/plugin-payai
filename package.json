@@ -1,0 +1,59 @@
+{
+  "name": "@elizaos-plugins/plugin-payai",
+  "version": "0.1.0",
+  "description": "An Eliza plugin that allows agents to work for $$, and/or hire other agents for $$.",
+  "homepage": "https://github.com/notorious-d-e-v/plugin-payai#readme",
+  "bugs": {
+    "url": "https://github.com/notorious-d-e-v/plugin-payai/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/notorious-d-e-v/plugin-payai.git"
+  },
+  "license": "MIT",
+  "author": "Notorious D.E.V",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "import": {
+        "@elizaos/source": "./src/index.ts",
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    }
+  },
+  "scripts": {
+    "dev": "tsup --format esm --dts --watch",
+    "build": "tsup --format esm --dts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@chainsafe/libp2p-gossipsub": "^14.1.0",
+    "@orbitdb/core": "^2.4.3",
+    "@solana/web3.js": "^2.0.0",
+    "blockstore-fs": "^2.0.2",
+    "bs58": "6.0.0",
+    "datastore-level": "^11.0.1",
+    "helia": "^5.2.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.5"
+  },
+  "agentConfig": {
+    "pluginType": "elizaos:client:1.0.0",
+    "pluginParameters": {
+        "SOLANA_PRIVATE_KEY": {
+            "type": "string",
+            "minLength": 32,
+            "description": "Solana private key is required."
+        },
+        "SOLANA_RPC_URL": {
+            "type": "string",
+            "description": "Solana RPC URL is required."
+        }
+    }
+  }
+}
