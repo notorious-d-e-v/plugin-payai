@@ -63,3 +63,7 @@ eliza.manifest.sgx
 eliza.sig
 
 *.swp
+
+.nvmrc
+.npmrc
+.vscode/
