@@ -26,7 +26,7 @@ class PayAIClient implements Client {
   public buyOffersDB: any = null;
   public agreementsDB: any = null;
   private servicesConfig: any = null;
-  private servicesConfigPath: string = sellerServicesFile;
+  private servicesConfigPath: string;
   private servicesConfigInterval: NodeJS.Timeout | null = null;
   public sellerServiceAdCID: string | null = null;
 
@@ -84,6 +84,7 @@ class PayAIClient implements Client {
       await this.updatesDB.add(`Agent ${runtime.character.name} joined the payai network`);
 
       // init seller agent checks
+      this.servicesConfigPath = `${agentDir}/sellerServices.json`;
       await this.initSellerAgentFunctionality(runtime);
 
       elizaLogger.info('PayAI Client initialized');

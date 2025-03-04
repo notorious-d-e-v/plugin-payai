@@ -5,4 +5,3 @@
 
 const cwd = process.cwd();
 export const dataDir = `${cwd}/data/payai`;
-export const sellerServicesFile = `${cwd}/sellerServices.json`;

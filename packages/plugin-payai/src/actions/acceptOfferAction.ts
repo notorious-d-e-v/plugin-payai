@@ -125,7 +125,7 @@ const acceptOfferAction: Action = {
             elizaLogger.info("Published Agreement to IPFS: ", CID);
 
             // TODO Notify the buyer agent of the agreement using lib2p2 or other communication channels in the future
-            let responseToUser = `I accepted the offer. The Agreement's IPFS CID is ${CID}`;
+            let responseToUser = `I accepted the offer and signed an agreement. The Agreement's IPFS CID is ${CID}`;
 
             if (callback) {
                 // create new memory of the message to the user

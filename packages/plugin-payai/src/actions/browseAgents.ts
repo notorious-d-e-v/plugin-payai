@@ -8,7 +8,7 @@ import {
     elizaLogger,
     generateText,
     getEmbeddingZeroVector,
-    parseJsonArrayFromText,
+    parseJSONObjectFromText,
     type Action,
     type Content
  } from '@elizaos/core';
@@ -16,13 +16,38 @@ import { payAIClient } from '../client';
 
 
 // query for LLM to find PayAI services that match the user's query
-const findMatchingServicesTemplate =
-`Given the following query and list of services, return a list of hashes of services that could match the query.
-Respond with a list of strings containing the hashes. Do not respond with any additional text or information outside of the list.
-If there are no matches, you can return an empty list.
+const findMatchingServicesTemplate = `
+Analyze the following conversation to extract a list of services that the user is looking for.
+There could be multiple services, so make sure you extract all of them.
 
-Query: {{searchQuery}}
-Services: {{services}}
+The Seller is identified by their solana wallet address.
+The Service Ad CID is identified by the hash of the entry.
+
+Conversation:
+
+{{recentMessages}}
+
+
+All possible services:
+
+{{services}}
+
+
+Return a JSON object containing all of the services that match what the user is looking for.
+For example:
+{
+    "success": true,
+    "result": "Here are the services that match your query:\n\nFirst Service Name\nFirst Service Description\nFirst Service Price\nSeller: B2imQsisfrTLoXxzgQfxtVJ3vQR9bGbpmyocVu3nWGJ6\nService Ad CID: zdpuAuhwXA4NGv5Qqc6nFHPjHtFxcqnYRSGyW1FBCkrfm2tgF\n\nSecond Service Name\nSecond Service Description\nSecond Service Price\nSeller: updtkJ8HAhh3rSkBCd3p9Z1Q74yJW4rMhSbScRskDPM\nService Ad CID: zdpuAn5qVvoT1h2KfwNxZehFnNotCdBeEgVFGYTBuSEyKPtDB"
+}
+
+If no matching services were found, then set the "success" field to false and set the result to a string informing the user that no matching services were found, and ask them to try rewording their search. Be natural and polite.
+For example, if there were no matching services, then return:
+{
+    "success": false,
+    "result": "A natural message informing the user that no matching services were found, and to try rewording their search."
+}
+
+Only return a JSON mardown block.
 `;
 
 
@@ -34,7 +59,7 @@ Services: {{services}}
 const browseAgents: Action = {
     name: "BROWSE_PAYAI_AGENTS",
     similes: ["SEARCH_SERVICES", "FIND_SELLER", "HIRE_AGENT", "FIND_SERVICE"],
-    description: "Search through the PayAI marketplace to find a seller providing a service that matches what you are looking for.",
+    description: "Search through the PayAI marketplace to find a seller providing a service that the buyer is looking for.",
     suppressInitialMessage: true,
     validate: async (runtime: IAgentRuntime, message: Memory) => {
         return true;
@@ -67,62 +92,48 @@ const browseAgents: Action = {
                 template: findMatchingServicesTemplate,
             });
 
-            // TODO the query can be improved to only select the specific
-            // services from a seller, rather than return all of the sellers' services
             const findMatchingServicesContent = await generateText({
                 runtime,
                 context: findMatchingServicesContext,
                 modelClass: ModelClass.SMALL,
             });
 
-            // hashes of services that match the query
-            let results = JSON.parse(findMatchingServicesContent.replace(/'/g, '"'));
+            elizaLogger.debug("found these matching services from the conversation:", findMatchingServicesContent);
+            const matchingServices = parseJSONObjectFromText(findMatchingServicesContent);
 
-            // return the list of services that match the hashes
-            results = services.filter((service: any) => {
-              return results.includes(service.hash);
-            });
-
-            // only keep the fields we want to show
-            results = results.map((service: any) => {
-              return {
-                seller: service.value.message.identity,
-                serviceAdCID: service.hash,
-                services: service.value.message.services
-              };
-            });
-
-
-            if (results.length > 0) {
-                if (callback) {
-                    const callbackText = `Found ${results.length} matching services. Check them out below!\n\n${JSON.stringify(results, null, 2)}`;
-
-                    // create new memory of the message to the user
-                    const newMemory: Memory = {
-                        userId: message.agentId,
-                        agentId: message.agentId,
-                        roomId: message.roomId,
-                        content: {
-                            text: callbackText,
-                            action: "BROWSE_PAYAI_AGENTS",
-                            source: message.content.source,
-                            services: results,
-                        },
-                        embedding: getEmbeddingZeroVector()
-                    };
-                    await runtime.messageManager.createMemory(newMemory);
-
-                    // send message to the user
-                    callback(newMemory.content);
-                }
-            } else {
+            // communicate failure to the user
+            if (matchingServices.success === false) {
+                elizaLogger.info("Couldn't find any services matching the user's request.");
                 if (callback) {
                     callback({
-                        text: "No matching service providers found.",
-                        content: { error: "No matching services found." },
+                        text: matchingServices.result,
                         action: "BROWSE_PAYAI_AGENTS",
+                        source: message.content.source,
                     });
                 }
+                return false;
+            }
+
+            // communicate success to the user
+            const responseToUser = matchingServices.result;
+            if (callback) {
+                // create new memory of the message to the user
+                const newMemory: Memory = {
+                    userId: message.agentId,
+                    agentId: message.agentId,
+                    roomId: message.roomId,
+                    content: {
+                        text: responseToUser,
+                        action: "BROWSE_PAYAI_AGENTS",
+                        source: message.content.source,
+                        services: matchingServices.result,
+                    },
+                    embedding: getEmbeddingZeroVector()
+                };
+                await runtime.messageManager.createMemory(newMemory);
+
+                // send message to the user
+                callback(newMemory.content);
             }
 
             return true;
@@ -145,7 +156,7 @@ const browseAgents: Action = {
             },
             {
                 user: "{{user2}}",
-                content: { text: "Found matching services. Check them out below!", action: "BROWSE_PAYAI_AGENTS" },
+                content: { text: "Found the following matching services. Check them out below!", action: "BROWSE_PAYAI_AGENTS" },
             },
         ],
         [
@@ -155,7 +166,7 @@ const browseAgents: Action = {
             },
             {
                 user: "{{user2}}",
-                content: { text: "Found matching services. Check them out below!", action: "BROWSE_PAYAI_AGENTS" },
+                content: { text: "Here are all the available services:", action: "BROWSE_PAYAI_AGENTS" },
             },
         ]
     ],
