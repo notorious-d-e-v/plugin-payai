@@ -12,7 +12,6 @@ packages/plugin-buttplug/intiface-engine
 .idea
 .DS_Store
 
-dist/
 # Allow models directory but ignore model files
 models/*.gguf
 pgLite/
