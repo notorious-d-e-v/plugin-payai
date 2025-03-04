@@ -27,17 +27,26 @@
   },
   "scripts": {
     "dev": "tsup --format esm --dts --watch",
-    "build": "tsup --format esm --dts",
+    "build": "tsup ./src/index.ts --format esm --dts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
     "@chainsafe/libp2p-gossipsub": "^14.1.0",
+    "@chainsafe/libp2p-noise": "^16.0.3",
+    "@chainsafe/libp2p-yamux": "^7.0.1",
+    "@elizaos/core": "^0.25.9",
+    "@libp2p/bootstrap": "^11.0.30",
+    "@libp2p/identify": "^3.0.25",
+    "@libp2p/tcp": "^10.1.6",
+    "@libp2p/websockets": "^9.2.6",
     "@orbitdb/core": "^2.4.3",
     "@solana/web3.js": "^2.0.0",
     "blockstore-fs": "^2.0.2",
     "bs58": "6.0.0",
     "datastore-level": "^11.0.1",
-    "helia": "^5.2.0"
+    "helia": "^5.2.0",
+    "libp2p": "^2.8.0",
+    "multiformats": "^13.3.2"
   },
   "devDependencies": {
     "tsup": "^8.3.5"
@@ -45,15 +54,15 @@
   "agentConfig": {
     "pluginType": "elizaos:client:1.0.0",
     "pluginParameters": {
-        "SOLANA_PRIVATE_KEY": {
-            "type": "string",
-            "minLength": 32,
-            "description": "Solana private key is required."
-        },
-        "SOLANA_RPC_URL": {
-            "type": "string",
-            "description": "Solana RPC URL is required."
-        }
+      "SOLANA_PRIVATE_KEY": {
+        "type": "string",
+        "minLength": 32,
+        "description": "Solana private key is required."
+      },
+      "SOLANA_RPC_URL": {
+        "type": "string",
+        "description": "Solana RPC URL is required."
+      }
     }
   }
 }
