@@ -102,7 +102,7 @@ const browseAgents: Action = {
             const matchingServices = parseJSONObjectFromText(findMatchingServicesContent);
 
             // communicate failure to the user
-            if (matchingServices.success === false) {
+            if (matchingServices.success === false || matchingServices.success === "false") {
                 elizaLogger.info("Couldn't find any services matching the user's request.");
                 if (callback) {
                     callback({

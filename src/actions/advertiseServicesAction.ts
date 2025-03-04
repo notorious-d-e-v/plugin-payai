@@ -85,7 +85,6 @@ const advertiseServicesAction: Action = {
     description: "Ask the user for the services they want to sell, create the services file locally, and publish it to the serviceAdsDB.",
     suppressInitialMessage: true,
     validate: async (runtime: IAgentRuntime, message: Memory) => {
-        console.log("message.content.source: ", message.content.source)
         if (message.content.source !== "direct") {
             elizaLogger.debug("ADVERTISE_SERVICES action is only allowed when interacting with the direct client. This message was from:", message.content.source);
             return false;
@@ -119,14 +118,12 @@ const advertiseServicesAction: Action = {
                 modelClass: ModelClass.SMALL,
             });
 
-            elizaLogger.debug("extracted the following services from the conversation:", extractedServicesText);
-            console.log("extracted the following services from the conversation:", extractedServicesText);
+            elizaLogger.debug("extracted services from generateText:", extractedServicesText);
             const extractedServices = parseJSONObjectFromText(extractedServicesText);
-
-            console.log("message: ", message)
+            elizaLogger.debug("extracted the following services from the conversation:", extractedServicesText);
 
             // Validate services details
-            if (extractedServices.success === false) {
+            if (extractedServices.success === false || extractedServices.success === "false") {
                 elizaLogger.info("Need more information from the user to advertise services.");
                 if (callback) {
                     callback({
@@ -154,11 +151,10 @@ const advertiseServicesAction: Action = {
             });
 
             elizaLogger.debug("confirmation from the user:", confirmServicesText);
-            console.log("confirmation from the user:", confirmServicesText);
             const confirmServices = parseJSONObjectFromText(confirmServicesText);
 
             // Validate confirmation
-            if (confirmServices.success === false) {
+            if (confirmServices.success === false || confirmServices.success === "false") {
                 elizaLogger.info("Need confirmation from the user.");
                 if (callback) {
                     callback({
@@ -172,7 +168,7 @@ const advertiseServicesAction: Action = {
 
             // create the services file locally
             const servicesFilePath = payAIClient.servicesConfigPath;
-            console.log("writing the following services to the services file:", extractedServices.result);
+            elizaLogger.debug("writing the following services to the services file:", extractedServices.result);
             fs.writeFileSync(servicesFilePath, JSON.stringify(extractedServices.result, null, 2));
             elizaLogger.info("Created services file locally at:", servicesFilePath);
 

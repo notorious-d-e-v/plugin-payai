@@ -81,7 +81,7 @@ const executeContractAction: Action = {
             const extractedDetails = parseJSONObjectFromText(extractedDetailsText);
 
             // Validate agreement details
-            if (extractedDetails.success === false) {
+            if (extractedDetails.success === false || extractedDetails.success === "false") {
                 elizaLogger.info("Need more information from the user to execute the contract.");
                 if (callback) {
                     callback({

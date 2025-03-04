@@ -83,7 +83,7 @@ const acceptOfferAction: Action = {
             const extractedDetails = parseJSONObjectFromText(extractedDetailsText);
 
             // Validate offer details
-            if (extractedDetails.success === false) {
+            if (extractedDetails.success === false || extractedDetails.success === "false") {
                 elizaLogger.info("Need more information from the user to accept the offer.");
                 if (callback) {
                     callback({

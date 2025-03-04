@@ -478,7 +478,7 @@ var browseAgents = {
       });
       elizaLogger2.debug("found these matching services from the conversation:", findMatchingServicesContent);
       const matchingServices = parseJSONObjectFromText(findMatchingServicesContent);
-      if (matchingServices.success === false) {
+      if (matchingServices.success === false || matchingServices.success === "false") {
         elizaLogger2.info("Couldn't find any services matching the user's request.");
         if (callback) {
           callback({
@@ -611,7 +611,7 @@ var makeOfferAction = {
       });
       elizaLogger3.debug("extracted the following Buy Offer details from the conversation:", extractedDetailsText);
       const extractedDetails = parseJSONObjectFromText2(extractedDetailsText);
-      if (extractedDetails.success === false) {
+      if (extractedDetails.success === false || extractedDetails.success === "false") {
         elizaLogger3.info("Need more information from the user to make an offer.");
         if (callback) {
           callback({
@@ -803,7 +803,7 @@ var acceptOfferAction = {
       });
       elizaLogger4.debug("extracted the following Buy Offer CID from the conversation:", extractedDetailsText);
       const extractedDetails = parseJSONObjectFromText3(extractedDetailsText);
-      if (extractedDetails.success === false) {
+      if (extractedDetails.success === false || extractedDetails.success === "false") {
         elizaLogger4.info("Need more information from the user to accept the offer.");
         if (callback) {
           callback({
@@ -1039,7 +1039,6 @@ var advertiseServicesAction = {
   description: "Ask the user for the services they want to sell, create the services file locally, and publish it to the serviceAdsDB.",
   suppressInitialMessage: true,
   validate: async (runtime, message) => {
-    console.log("message.content.source: ", message.content.source);
     if (message.content.source !== "direct") {
       elizaLogger5.debug("ADVERTISE_SERVICES action is only allowed when interacting with the direct client. This message was from:", message.content.source);
       return false;
@@ -1062,11 +1061,10 @@ var advertiseServicesAction = {
         context: extractServicesContext,
         modelClass: ModelClass4.SMALL
       });
-      elizaLogger5.debug("extracted the following services from the conversation:", extractedServicesText);
-      console.log("extracted the following services from the conversation:", extractedServicesText);
+      elizaLogger5.debug("extracted services from generateText:", extractedServicesText);
       const extractedServices = parseJSONObjectFromText4(extractedServicesText);
-      console.log("message: ", message);
-      if (extractedServices.success === false) {
+      elizaLogger5.debug("extracted the following services from the conversation:", extractedServicesText);
+      if (extractedServices.success === false || extractedServices.success === "false") {
         elizaLogger5.info("Need more information from the user to advertise services.");
         if (callback) {
           callback({
@@ -1092,9 +1090,8 @@ Price: ${service.price}`
         modelClass: ModelClass4.SMALL
       });
       elizaLogger5.debug("confirmation from the user:", confirmServicesText);
-      console.log("confirmation from the user:", confirmServicesText);
       const confirmServices = parseJSONObjectFromText4(confirmServicesText);
-      if (confirmServices.success === false) {
+      if (confirmServices.success === false || confirmServices.success === "false") {
         elizaLogger5.info("Need confirmation from the user.");
         if (callback) {
           callback({
@@ -1106,7 +1103,7 @@ Price: ${service.price}`
         return false;
       }
       const servicesFilePath = payAIClient.servicesConfigPath;
-      console.log("writing the following services to the services file:", extractedServices.result);
+      elizaLogger5.debug("writing the following services to the services file:", extractedServices.result);
       fs2.writeFileSync(servicesFilePath, JSON.stringify(extractedServices.result, null, 2));
       elizaLogger5.info("Created services file locally at:", servicesFilePath);
       const serviceAd = await prepareServiceAd(extractedServices.result, runtime);
