@@ -1,5 +1,5 @@
 import type { Plugin } from "@elizaos/core";
-import { payAIClient } from "./client.ts";
+import { payAIClient } from "./clients/client.ts";
 import browseServices from "./actions/browseAgents.ts";
 import makeOfferAction from "./actions/makeOfferAction.ts";
 import acceptOfferAction from "./actions/acceptOfferAction.ts";

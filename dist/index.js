@@ -1,4 +1,4 @@
-// src/client.ts
+// src/clients/client.ts
 import { elizaLogger } from "@elizaos/core";
 import { createHelia } from "helia";
 import { createLibp2p } from "libp2p";
@@ -67,7 +67,7 @@ var libp2pOptions = {
 var cwd = process.cwd();
 var dataDir = `${cwd}/data/payai`;
 
-// src/client.ts
+// src/clients/client.ts
 import fs from "fs";
 
 // src/utils.ts
@@ -200,7 +200,7 @@ async function queryOrbitDbReturningCompleteEntries(db, findFunction) {
   return results;
 }
 
-// src/client.ts
+// src/clients/client.ts
 var {
   createHash: createHash2
 } = await import("node:crypto");

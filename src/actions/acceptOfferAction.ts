@@ -12,7 +12,7 @@ import {
     getEmbeddingZeroVector,
 } from '@elizaos/core';
 import { verifySignature } from '@solana/web3.js';
-import { payAIClient } from '../client';
+import { payAIClient } from '../clients/client.ts';
 import { getCIDFromOrbitDbHash, prepareAgreement, queryOrbitDbReturningCompleteEntries, verifyMessage } from '../utils';
 
 interface AgreementDetails {

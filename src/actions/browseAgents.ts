@@ -12,7 +12,7 @@ import {
     type Action,
     type Content
  } from '@elizaos/core';
-import { payAIClient } from '../client';
+import { payAIClient } from '../clients/client.ts';
 
 
 // query for LLM to find PayAI services that match the user's query

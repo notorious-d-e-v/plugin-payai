@@ -7,11 +7,11 @@ import { base58btc } from 'multiformats/bases/base58';
 import { createOrbitDB, OrbitDB, IPFSAccessController } from '@orbitdb/core';
 import { FsBlockstore } from 'blockstore-fs';
 import { LevelDatastore } from 'datastore-level'
-import { libp2pOptions } from './config/libp2p';
-import { dataDir, sellerServicesFile } from './datadir';
-import bootstrapConfig from './config/bootstrap.json'
+import { libp2pOptions } from '../config/libp2p.ts';
+import { dataDir } from '../datadir.ts';
+import bootstrapConfig from '../config/bootstrap.json' assert { type: "json" };
 import fs from 'fs';
-import { getSolanaKeypair, hashAndSign, getCIDFromOrbitDbHash, prepareBuyOffer, queryOrbitDbReturningCompleteEntries, prepareServiceAd, getBase58PublicKeyFromCryptoKey } from './utils';
+import { getCIDFromOrbitDbHash, queryOrbitDbReturningCompleteEntries, prepareServiceAd } from '../utils.ts';
 
 const {
     createHash,

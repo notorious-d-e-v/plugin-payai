@@ -12,8 +12,8 @@ import {
     parseJSONObjectFromText
 } from '@elizaos/core';
 import fs from 'fs';
-import { payAIClient } from '../client';
-import { prepareServiceAd, getCIDFromOrbitDbHash } from '../utils';
+import { payAIClient } from '../clients/client.ts';
+import { prepareServiceAd, getCIDFromOrbitDbHash } from '../utils.ts';
 
 
 

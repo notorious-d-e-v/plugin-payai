@@ -12,8 +12,8 @@ import {
     getEmbeddingZeroVector,
 } from '@elizaos/core';
 import { Program, AnchorProvider, web3, BN } from '@project-serum/anchor';
-import { payAIClient } from '../client';
-import { verifyMessage, getSolanaKeypair, getBase58PublicKeyFromCryptoKey } from '../utils';
+import { payAIClient } from '../clients/client.ts';
+import { verifyMessage, getSolanaKeypair, getBase58PublicKeyFromCryptoKey } from '../utils.ts';
 
 interface ContractDetails {
     agreementCID: string;

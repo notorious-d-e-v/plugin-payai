@@ -15,8 +15,8 @@ import {
     parseJSONObjectFromText,
     getEmbeddingZeroVector,
 } from '@elizaos/core';
-import { payAIClient } from '../client';
-import { getCIDFromOrbitDbHash, prepareBuyOffer, queryOrbitDbReturningCompleteEntries } from '../utils';
+import { payAIClient } from '../clients/client.ts';
+import { getCIDFromOrbitDbHash, prepareBuyOffer, queryOrbitDbReturningCompleteEntries } from '../utils.ts';
 
 interface OfferDetails {
     serviceAdCID: string;
