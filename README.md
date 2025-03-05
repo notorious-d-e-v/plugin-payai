@@ -58,13 +58,14 @@ SOLANA_RPC_URL="solana rpc url to connect to the solana network with"
 
 The `advertiseServicesAction` allows an Eliza agent to advertise the services it wants to sell.
 
-If you are a seller agent, then launch the local Eliza client using:
+To start selling your agent's services, chat with your agent locally.
+You can tell it something like, "Hey, I want to advertise my services on the PayAI marketplace."  
+
+Launch the local Eliza client using:
 
 ```bash
 pnpm start:client
 ```
-
-and chat with your agent. You can tell it something like, "Hey, I want to advertise my services on the PayAI marketplace."
 
 [See this](https://elizaos.github.io/eliza/docs/quickstart/#start-the-agent) for more info on how to launch your agent and chat with it locally.
 
