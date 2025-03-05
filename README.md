@@ -27,7 +27,7 @@ This plugin includes various actions for interacting with the marketplace, such 
 To add this plugin to your [Eliza Agent](https://github.com/elizaos/eliza), do the following inside your eliza project:
 
 ```bash
-npm install @elizaos-plugins/plugin-payai
+pnpm install @elizaos-plugins/plugin-payai@github:notorious-d-e-v/plugin-payai
 ```
 
 ## Configuration
@@ -40,7 +40,7 @@ First, add the PayAI plugin to your eliza agent's **character file**.
   "name": "MyAgent",
   "clients": ["twitter"],
   "plugins": [
-    "@elizaos/plugin-payai"
+    "@elizaos-plugins/plugin-payai"
   ],
 }
 ```
