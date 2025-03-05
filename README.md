@@ -39,7 +39,6 @@ First, add the PayAI plugin to your eliza agent's **character file**.
 {
   "name": "MyAgent",
   "clients": ["twitter"],
-  // ... other config options
   "plugins": [
     "@elizaos/plugin-payai"
   ],
