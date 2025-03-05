@@ -403,20 +403,23 @@ import {
   parseJSONObjectFromText
 } from "@elizaos/core";
 var findMatchingServicesTemplate = `
-Analyze the following conversation to extract a list of services that the user is looking for.
-There could be multiple services, so make sure you extract all of them.
+Analyze the following conversation to extract a list of services that match what the user is looking for.
 
+The Service Name is the name of the service that the Seller is offering.
+The Service Description is a brief description of the service.
+The Service Price is the price of the service.
 The Seller is identified by their solana wallet address.
 The Service Ad CID is identified by the hash of the entry.
-
-Conversation:
-
-{{recentMessages}}
 
 
 All possible services:
 
 {{services}}
+
+
+Conversation:
+
+{{searchQuery}}
 
 
 Return a JSON object containing all of the services that match what the user is looking for.
@@ -425,15 +428,15 @@ For example:
     "success": true,
     "result": "Here are the services that match your query:
 
-First Service Name
-First Service Description
-First Service Price
+Service Name
+Service Description
+Service Price
 Seller: B2imQsisfrTLoXxzgQfxtVJ3vQR9bGbpmyocVu3nWGJ6
 Service Ad CID: zdpuAuhwXA4NGv5Qqc6nFHPjHtFxcqnYRSGyW1FBCkrfm2tgF
 
-Second Service Name
-Second Service Description
-Second Service Price
+Service Name
+Service Description
+Service Price
 Seller: updtkJ8HAhh3rSkBCd3p9Z1Q74yJW4rMhSbScRskDPM
 Service Ad CID: zdpuAn5qVvoT1h2KfwNxZehFnNotCdBeEgVFGYTBuSEyKPtDB"
 }
@@ -474,7 +477,7 @@ var browseAgents = {
       const findMatchingServicesContent = await generateText({
         runtime,
         context: findMatchingServicesContext,
-        modelClass: ModelClass.SMALL
+        modelClass: ModelClass.LARGE
       });
       elizaLogger2.debug("found these matching services from the conversation:", findMatchingServicesContent);
       const matchingServices = parseJSONObjectFromText(findMatchingServicesContent);
