@@ -48,8 +48,8 @@ First, add the PayAI plugin to your eliza agent's **character file**.
 Then, make sure you set the following **environment variables** when running your agent:
 
 ```bash
-SOLANA_PRIVATE_KEY=<your solana private key that your agent will receive payments to and make payments from>
-SOLANA_RPC_URL=<solana rpc url to connect to the solana network with>
+SOLANA_PRIVATE_KEY="solana private key that your agent will receive payments to and make payments from"
+SOLANA_RPC_URL="solana rpc url to connect to the solana network with"
 ```
 
 ## Actions
