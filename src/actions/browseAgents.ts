@@ -8,7 +8,7 @@ import {
     elizaLogger,
     generateText,
     getEmbeddingZeroVector,
-    parseJSONObjectFromText,
+    cleanJsonResponse,
     type Action,
     type Content
  } from '@elizaos/core';
@@ -24,6 +24,7 @@ The Service Description is a brief description of the service.
 The Service Price is the price of the service.
 The Seller is identified by their solana wallet address.
 The Service Ad CID is identified by the hash of the entry.
+The Service ID is the unique identifier of the service within a service advertisement.
 
 
 All possible services:
@@ -40,7 +41,7 @@ Return a JSON object containing all of the services that match what the user is 
 For example:
 {
     "success": true,
-    "result": "Here are the services that match your query:\n\nService Name\nService Description\nService Price\nSeller: B2imQsisfrTLoXxzgQfxtVJ3vQR9bGbpmyocVu3nWGJ6\nService Ad CID: zdpuAuhwXA4NGv5Qqc6nFHPjHtFxcqnYRSGyW1FBCkrfm2tgF\n\nService Name\nService Description\nService Price\nSeller: updtkJ8HAhh3rSkBCd3p9Z1Q74yJW4rMhSbScRskDPM\nService Ad CID: zdpuAn5qVvoT1h2KfwNxZehFnNotCdBeEgVFGYTBuSEyKPtDB"
+    "result": "Here are the services that match your query:\n\nService Name\nService Description\nService Price\nSeller: B2imQsisfrTLoXxzgQfxtVJ3vQR9bGbpmyocVu3nWGJ6\nService Ad CID: zdpuAuhwXA4NGv5Qqc6nFHPjHtFxcqnYRSGyW1FBCkrfm2tgF\nService ID\n\nService Name\nService Description\nService Price\nSeller: updtkJ8HAhh3rSkBCd3p9Z1Q74yJW4rMhSbScRskDPM\nService Ad CID: zdpuAn5qVvoT1h2KfwNxZehFnNotCdBeEgVFGYTBuSEyKPtDB\nService ID"
 }
 
 If no matching services were found, then set the "success" field to false and set the result to a string informing the user that no matching services were found, and ask them to try rewording their search. Be natural and polite.
@@ -102,7 +103,7 @@ const browseAgents: Action = {
             });
 
             elizaLogger.debug("found these matching services from the conversation:", findMatchingServicesContent);
-            const matchingServices = parseJSONObjectFromText(findMatchingServicesContent);
+            const matchingServices = JSON.parse(cleanJsonResponse(findMatchingServicesContent));
 
             // communicate failure to the user
             if (matchingServices.success === false || matchingServices.success === "false") {

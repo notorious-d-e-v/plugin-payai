@@ -188,7 +188,7 @@ class PayAIClient implements Client {
     public async getEntryFromHash(hash: string, db: any): Promise<any> {
         try {
             const entry = await db.log.get(hash);
-            return entry.payload.value;
+            return entry;
         } catch (error) {
             elizaLogger.error('Error getting orbitdb entry from hash', error);
             throw error;

@@ -8,7 +8,7 @@ import {
     elizaLogger,
     generateText,
     type Action,
-    parseJSONObjectFromText,
+    cleanJsonResponse,
     getEmbeddingZeroVector,
 } from '@elizaos/core';
 import { Program, AnchorProvider, web3, BN } from '@project-serum/anchor';
@@ -78,7 +78,7 @@ const executeContractAction: Action = {
             });
 
             elizaLogger.debug("extracted the following Agreement CID from the conversation:", extractedDetailsText);
-            const extractedDetails = parseJSONObjectFromText(extractedDetailsText);
+            const extractedDetails = JSON.parse(cleanJsonResponse(extractedDetailsText));
 
             // Validate agreement details
             if (extractedDetails.success === false || extractedDetails.success === "false") {
@@ -94,7 +94,7 @@ const executeContractAction: Action = {
             }
 
             // fetch the agreement from the agreementsDB
-            const agreement = await payAIClient.getEntryFromCID(extractedDetails.result.agreementCID, payAIClient.agreementsDB);
+            const agreement = (await payAIClient.getEntryFromCID(extractedDetails.result.agreementCID, payAIClient.agreementsDB)).payload.value;;
 
             // verify the signature of the agreement
             const isValidAgreement = await verifyMessage(agreement.identity, agreement.signature, agreement.message);
@@ -111,7 +111,7 @@ const executeContractAction: Action = {
             }
 
             // fetch the buy offer from the buyOffersDB
-            const buyOffer = await payAIClient.getEntryFromCID(agreement.message.BuyerOfferCID, payAIClient.buyOffersDB);
+            const buyOffer = (await payAIClient.getEntryFromCID(agreement.message.BuyerOfferCID, payAIClient.buyOffersDB)).payload.value;;
 
             // verify the signature of the buy offer
             const isValidBuyOffer = await verifyMessage(buyOffer.identity, buyOffer.signature, buyOffer.message);

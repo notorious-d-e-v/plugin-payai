@@ -332,7 +332,7 @@ var PayAIClient = class {
   async getEntryFromHash(hash, db) {
     try {
       const entry = await db.log.get(hash);
-      return entry.payload.value;
+      return entry;
     } catch (error) {
       elizaLogger.error("Error getting orbitdb entry from hash", error);
       throw error;
@@ -400,7 +400,7 @@ import {
   elizaLogger as elizaLogger2,
   generateText,
   getEmbeddingZeroVector,
-  parseJSONObjectFromText
+  cleanJsonResponse
 } from "@elizaos/core";
 var findMatchingServicesTemplate = `
 Analyze the following conversation to extract a list of services that match what the user is looking for.
@@ -410,6 +410,7 @@ The Service Description is a brief description of the service.
 The Service Price is the price of the service.
 The Seller is identified by their solana wallet address.
 The Service Ad CID is identified by the hash of the entry.
+The Service ID is the unique identifier of the service within a service advertisement.
 
 
 All possible services:
@@ -433,12 +434,14 @@ Service Description
 Service Price
 Seller: B2imQsisfrTLoXxzgQfxtVJ3vQR9bGbpmyocVu3nWGJ6
 Service Ad CID: zdpuAuhwXA4NGv5Qqc6nFHPjHtFxcqnYRSGyW1FBCkrfm2tgF
+Service ID
 
 Service Name
 Service Description
 Service Price
 Seller: updtkJ8HAhh3rSkBCd3p9Z1Q74yJW4rMhSbScRskDPM
-Service Ad CID: zdpuAn5qVvoT1h2KfwNxZehFnNotCdBeEgVFGYTBuSEyKPtDB"
+Service Ad CID: zdpuAn5qVvoT1h2KfwNxZehFnNotCdBeEgVFGYTBuSEyKPtDB
+Service ID"
 }
 
 If no matching services were found, then set the "success" field to false and set the result to a string informing the user that no matching services were found, and ask them to try rewording their search. Be natural and polite.
@@ -480,7 +483,7 @@ var browseAgents = {
         modelClass: ModelClass.LARGE
       });
       elizaLogger2.debug("found these matching services from the conversation:", findMatchingServicesContent);
-      const matchingServices = parseJSONObjectFromText(findMatchingServicesContent);
+      const matchingServices = JSON.parse(cleanJsonResponse(findMatchingServicesContent));
       if (matchingServices.success === false || matchingServices.success === "false") {
         elizaLogger2.info("Couldn't find any services matching the user's request.");
         if (callback) {
@@ -552,13 +555,30 @@ import {
   composeContext as composeContext2,
   elizaLogger as elizaLogger3,
   generateText as generateText2,
-  parseJSONObjectFromText as parseJSONObjectFromText2,
+  cleanJsonResponse as cleanJsonResponse2,
   getEmbeddingZeroVector as getEmbeddingZeroVector2
 } from "@elizaos/core";
 var extractOfferDetailsTemplate = `
-Analyze the following conversation to extract Offer Details from a buyer to a seller.
+Analyze the Conversation below to extract Offer Details from a buyer to a seller.
+Offer Details have this schema when successful:
+{
+    "success": true,
+    "result": {
+        "serviceAdCID": "hash of the seller's services",
+        "wallet": "Solana public key of the seller",
+        "desiredServiceID": "ID of the service the buyer wants to purchase",
+        "desiredUnitAmount": "Amount of units the buyer wants to purchase"
+}
 
+Offer Details have this schema when unsuccessful:
+{
+    "success": false,
+    "result": "feedback message"
+}
+
+Conversation:
 {{recentMessages}}
+
 
 Return a JSON object containing only the fields where information was clearly found.
 For example:
@@ -612,8 +632,9 @@ var makeOfferAction = {
         context: makeOfferContext,
         modelClass: ModelClass2.SMALL
       });
-      elizaLogger3.debug("extracted the following Buy Offer details from the conversation:", extractedDetailsText);
-      const extractedDetails = parseJSONObjectFromText2(extractedDetailsText);
+      elizaLogger3.debug("extractedDetailsText:", extractedDetailsText);
+      const extractedDetails = JSON.parse(cleanJsonResponse2(extractedDetailsText));
+      elizaLogger3.debug("extractedDetails:", extractedDetails);
       if (extractedDetails.success === false || extractedDetails.success === "false") {
         elizaLogger3.info("Need more information from the user to make an offer.");
         if (callback) {
@@ -754,7 +775,7 @@ import {
   composeContext as composeContext3,
   elizaLogger as elizaLogger4,
   generateText as generateText3,
-  parseJSONObjectFromText as parseJSONObjectFromText3,
+  cleanJsonResponse as cleanJsonResponse3,
   getEmbeddingZeroVector as getEmbeddingZeroVector3
 } from "@elizaos/core";
 var extractOfferCIDTemplate = `
@@ -805,7 +826,7 @@ var acceptOfferAction = {
         modelClass: ModelClass3.SMALL
       });
       elizaLogger4.debug("extracted the following Buy Offer CID from the conversation:", extractedDetailsText);
-      const extractedDetails = parseJSONObjectFromText3(extractedDetailsText);
+      const extractedDetails = JSON.parse(cleanJsonResponse3(extractedDetailsText));
       if (extractedDetails.success === false || extractedDetails.success === "false") {
         elizaLogger4.info("Need more information from the user to accept the offer.");
         if (callback) {
@@ -937,7 +958,8 @@ var acceptOfferAction = {
 };
 async function isValidBuyOffer(buyOfferCID, runtime) {
   try {
-    const buyOffer = await payAIClient.getEntryFromCID(buyOfferCID, payAIClient.buyOffersDB);
+    const buyOffer = (await payAIClient.getEntryFromCID(buyOfferCID, payAIClient.buyOffersDB)).payload.value;
+    ;
     const identity = buyOffer.identity;
     const signature = buyOffer.signature;
     const message = buyOffer.message;
@@ -971,7 +993,7 @@ import {
   elizaLogger as elizaLogger5,
   generateText as generateText4,
   getEmbeddingZeroVector as getEmbeddingZeroVector4,
-  parseJSONObjectFromText as parseJSONObjectFromText4
+  cleanJsonResponse as cleanJsonResponse4
 } from "@elizaos/core";
 import fs2 from "fs";
 var extractServicesTemplate = `
@@ -1065,7 +1087,7 @@ var advertiseServicesAction = {
         modelClass: ModelClass4.SMALL
       });
       elizaLogger5.debug("extracted services from generateText:", extractedServicesText);
-      const extractedServices = parseJSONObjectFromText4(extractedServicesText);
+      const extractedServices = JSON.parse(cleanJsonResponse4(extractedServicesText));
       elizaLogger5.debug("extracted the following services from the conversation:", extractedServicesText);
       if (extractedServices.success === false || extractedServices.success === "false") {
         elizaLogger5.info("Need more information from the user to advertise services.");
@@ -1093,7 +1115,7 @@ Price: ${service.price}`
         modelClass: ModelClass4.SMALL
       });
       elizaLogger5.debug("confirmation from the user:", confirmServicesText);
-      const confirmServices = parseJSONObjectFromText4(confirmServicesText);
+      const confirmServices = JSON.parse(cleanJsonResponse4(confirmServicesText));
       if (confirmServices.success === false || confirmServices.success === "false") {
         elizaLogger5.info("Need confirmation from the user.");
         if (callback) {

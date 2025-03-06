@@ -9,7 +9,7 @@ import {
     generateText,
     type Action,
     getEmbeddingZeroVector,
-    parseJSONObjectFromText
+    cleanJsonResponse,
 } from '@elizaos/core';
 import fs from 'fs';
 import { payAIClient } from '../clients/client.ts';
@@ -119,7 +119,7 @@ const advertiseServicesAction: Action = {
             });
 
             elizaLogger.debug("extracted services from generateText:", extractedServicesText);
-            const extractedServices = parseJSONObjectFromText(extractedServicesText);
+            const extractedServices = JSON.parse(cleanJsonResponse(extractedServicesText));
             elizaLogger.debug("extracted the following services from the conversation:", extractedServicesText);
 
             // Validate services details
@@ -151,7 +151,7 @@ const advertiseServicesAction: Action = {
             });
 
             elizaLogger.debug("confirmation from the user:", confirmServicesText);
-            const confirmServices = parseJSONObjectFromText(confirmServicesText);
+            const confirmServices = JSON.parse(cleanJsonResponse(confirmServicesText));
 
             // Validate confirmation
             if (confirmServices.success === false || confirmServices.success === "false") {

@@ -8,7 +8,7 @@ import {
     elizaLogger,
     generateText,
     type Action,
-    parseJSONObjectFromText,
+    cleanJsonResponse,
     getEmbeddingZeroVector,
 } from '@elizaos/core';
 import { verifySignature } from '@solana/web3.js';
@@ -80,7 +80,7 @@ const acceptOfferAction: Action = {
             });
 
             elizaLogger.debug("extracted the following Buy Offer CID from the conversation:", extractedDetailsText);
-            const extractedDetails = parseJSONObjectFromText(extractedDetailsText);
+            const extractedDetails = JSON.parse(cleanJsonResponse(extractedDetailsText));
 
             // Validate offer details
             if (extractedDetails.success === false || extractedDetails.success === "false") {
@@ -237,7 +237,7 @@ const acceptOfferAction: Action = {
 async function isValidBuyOffer(buyOfferCID: string, runtime: IAgentRuntime) {
     try {
         // get the buy offer from the buyOffersDB
-        const buyOffer = await payAIClient.getEntryFromCID(buyOfferCID, payAIClient.buyOffersDB);
+        const buyOffer = (await payAIClient.getEntryFromCID(buyOfferCID, payAIClient.buyOffersDB)).payload.value;;
 
         // verify the signature of the message using the identity
         const identity = buyOffer.identity;

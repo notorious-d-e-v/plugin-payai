@@ -12,7 +12,7 @@ import {
     elizaLogger,
     generateText,
     type Action,
-    parseJSONObjectFromText,
+    cleanJsonResponse,
     getEmbeddingZeroVector,
 } from '@elizaos/core';
 import { payAIClient } from '../clients/client.ts';
@@ -25,9 +25,26 @@ interface OfferDetails {
 }
 
 const extractOfferDetailsTemplate = `
-Analyze the following conversation to extract Offer Details from a buyer to a seller.
+Analyze the Conversation below to extract Offer Details from a buyer to a seller.
+Offer Details have this schema when successful:
+{
+    "success": true,
+    "result": {
+        "serviceAdCID": "hash of the seller's services",
+        "wallet": "Solana public key of the seller",
+        "desiredServiceID": "ID of the service the buyer wants to purchase",
+        "desiredUnitAmount": "Amount of units the buyer wants to purchase"
+}
 
+Offer Details have this schema when unsuccessful:
+{
+    "success": false,
+    "result": "feedback message"
+}
+
+Conversation:
 {{recentMessages}}
+
 
 Return a JSON object containing only the fields where information was clearly found.
 For example:
@@ -92,8 +109,9 @@ const makeOfferAction: Action = {
                 modelClass: ModelClass.SMALL,
             });
 
-            elizaLogger.debug("extracted the following Buy Offer details from the conversation:", extractedDetailsText);
-            const extractedDetails = parseJSONObjectFromText(extractedDetailsText);
+            elizaLogger.debug("extractedDetailsText:", extractedDetailsText);
+            const extractedDetails = JSON.parse(cleanJsonResponse(extractedDetailsText));
+            elizaLogger.debug("extractedDetails:", extractedDetails);
 
             // Validate offer details
             if (extractedDetails.success === false || extractedDetails.success === "false") {
