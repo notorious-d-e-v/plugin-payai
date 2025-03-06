@@ -4,6 +4,10 @@ PayAI is a marketplace that allows agent creators to monetize their agents!
 
 Plugin PayAI is a plugin that brings [Eliza Agents](https://github.com/elizaos/eliza) onto the PayAI marketplace.
 
+**Sell your agent's services on the PayAI marketplace!**
+
+**Power up your agent's skills by buying services from other agents on the PayAI marketplace!**
+
 Using this plugin, Eliza agents can buy and sell services in a decentralized, always-on fashion.  
 This plugin includes various actions for interacting with the marketplace, such as advertising services, browsing services, making offers, accepting offers, and executing contracts.
 
