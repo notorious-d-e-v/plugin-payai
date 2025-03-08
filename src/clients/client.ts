@@ -11,7 +11,12 @@ import { libp2pOptions } from '../config/libp2p.ts';
 import { dataDir } from '../datadir.ts';
 import bootstrapConfig from '../config/bootstrap.json' assert { type: "json" };
 import fs from 'fs';
-import { getCIDFromOrbitDbHash, queryOrbitDbReturningCompleteEntries, prepareServiceAd } from '../utils.ts';
+import {
+  getCIDFromOrbitDbHash,
+  getCIDObjectFromOrbitDbHash,
+  queryOrbitDbReturningCompleteEntries,
+  prepareServiceAd
+} from '../utils.ts';
 
 const {
     createHash,
@@ -62,6 +67,9 @@ class PayAIClient implements Client {
         elizaLogger.debug('payai updates db: ', entry.payload.value);
       });
 
+      // write to the updates database
+      await this.updatesDB.add(`Agent ${runtime.character.name} joined the payai network`);
+
       // open service ads database
       this.serviceAdsDB = await this.orbitdb.open(bootstrapConfig.databases.serviceAds, { sync: true });
       this.serviceAdsDB.events.on('update', async (entry) => {
@@ -79,9 +87,6 @@ class PayAIClient implements Client {
       this.agreementsDB.events.on('update', async (entry) => {
         elizaLogger.debug('payai agreements db: ', entry.payload.value);
       });
-
-      // write to the updates database
-      await this.updatesDB.add(`Agent ${runtime.character.name} joined the payai network`);
 
       // init seller agent checks
       this.servicesConfigPath = `${agentDir}/sellerServices.json`;

@@ -13,6 +13,7 @@ import {
     type Content
  } from '@elizaos/core';
 import { payAIClient } from '../clients/client.ts';
+import { getAllDbEntriesWithCIDs } from '../utils.ts';
 
 
 // query for LLM to find PayAI services that match the user's query
@@ -41,7 +42,7 @@ Return a JSON object containing all of the services that match what the user is 
 For example:
 {
     "success": true,
-    "result": "Here are the services that match your query:\n\nService Name\nService Description\nService Price\nSeller: B2imQsisfrTLoXxzgQfxtVJ3vQR9bGbpmyocVu3nWGJ6\nService Ad CID: zdpuAuhwXA4NGv5Qqc6nFHPjHtFxcqnYRSGyW1FBCkrfm2tgF\nService ID\n\nService Name\nService Description\nService Price\nSeller: updtkJ8HAhh3rSkBCd3p9Z1Q74yJW4rMhSbScRskDPM\nService Ad CID: zdpuAn5qVvoT1h2KfwNxZehFnNotCdBeEgVFGYTBuSEyKPtDB\nService ID"
+    "result": "Here are the services that match your query:\n\nService Name\nService Description\nService Price\nSeller: B2imQsisfrTLoXxzgQfxtVJ3vQR9bGbpmyocVu3nWGJ6\nService Ad CID: bafyreifo4inpuekp466muw2bmldqkg6zetiwi6psjyiwzzyz35bsmcvhrq\nService ID\n\nService Name\nService Description\nService Price\nSeller: updtkJ8HAhh3rSkBCd3p9Z1Q74yJW4rMhSbScRskDPM\nService Ad CID: bafyreifo4inpuekp46zetiwi6psjyiwzzyz35bsmcvhrq6muw2bmldqkg6\nService ID"
 }
 
 If no matching services were found, then set the "success" field to false and set the result to a string informing the user that no matching services were found, and ask them to try rewording their search. Be natural and polite.
@@ -85,7 +86,10 @@ const browseAgents: Action = {
                 state = await runtime.updateRecentMessageState(state);
             }
 
-            const services = await payAIClient.serviceAdsDB.all();
+            // query for all services in the database            
+            const services = await getAllDbEntriesWithCIDs(
+                payAIClient.serviceAdsDB
+            );
             const servicesString = JSON.stringify(services, null, 2);
 
             state.services = servicesString;
@@ -95,6 +99,8 @@ const browseAgents: Action = {
                 state,
                 template: findMatchingServicesTemplate,
             });
+
+            console.log("findMatchingServicesContext", findMatchingServicesContext);
 
             const findMatchingServicesContent = await generateText({
                 runtime,

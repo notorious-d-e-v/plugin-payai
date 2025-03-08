@@ -13,7 +13,7 @@ import {
 } from '@elizaos/core';
 import fs from 'fs';
 import { payAIClient } from '../clients/client.ts';
-import { prepareServiceAd, getCIDFromOrbitDbHash } from '../utils.ts';
+import { prepareServiceAd, getCIDFromOrbitDbHash, queryOrbitDbReturningCompleteEntries } from '../utils.ts';
 
 
 
@@ -21,72 +21,44 @@ const extractServicesTemplate = `
 Analyze the following conversation to extract the services that the user wants to sell.
 There could be multiple services, so make sure you extract all of them.
 
-{{recentMessages}}
-
 Return a JSON object containing only the fields where information was clearly found.
+
 For example:
 {
     "success": true,
     "result": [
         {
-            "name": "First Service Name",
-            "description": "First Service Description",
-            "price": "First Service Price"
-        },
-        {
-            "name": "Second Service Name",
-            "description": "Second Service Description",
-            "price": "Second Service Price"
+            "name": "Service Name",
+            "description": "Service Description",
+            "price": "Service Price"
         }
     ]
 }
 
-If the user did not provide enough information, then set the "success" field to false and set the result to a string asking the user to provide the missing information. If asking for missing information, be natural and polite.
+If the user did not provide enough information for any of the fields, then set the "success" field to false and set the result to a string asking the user to provide the missing information. 
+Be natural and polite when asking for missing information.
 For example, if you could not find the services, then return:
 {
     "success": false,
-    "result": "A natural message asking the user to provide information on the services they want to sell."
+    "result": "feedback message"
 }
 
-Only return a JSON mardown block.
-`;
-
-const confirmServicesTemplate = `
-Look for confirmation from the user that the following services are the only ones they are selling at the moment.
-
-{{services}}
-
-User's recent messages are below.
+The conversation is below
 
 {{recentMessages}}
 
-
-Return a JSON object containing only the fields where information was clearly found.
-If the user confirmed, then set the "success" field to true and set the result to "yes".
-For example:
-{
-    "success": true,
-    "result": "yes"
-}
-
-If the user did not confirm, then set the "success" field to false and set the result to a string asking the user to confirm.
-For example, if you could not find the confirmation, then return:
-{
-    "success": false,
-    "result": "Please confirm that these are the only services you are selling at the moment:\n\n{{services}}"
-}
-
 Only return a JSON mardown block.
 `;
 
+
 const advertiseServicesAction: Action = {
-    name: "ADVERTISE_SERVICES",
-    similes: ["SELL_SERVICES", "OFFER_SERVICES", "LIST_SERVICES"],
+    name: "SELL_SERVICES",
+    similes: ["ADVERTISE_SERVICES", "OFFER_SERVICES", "LIST_SERVICES"],
     description: "Ask the user for the services they want to sell, create the services file locally, and publish it to the serviceAdsDB.",
     suppressInitialMessage: true,
     validate: async (runtime: IAgentRuntime, message: Memory) => {
         if (message.content.source !== "direct") {
-            elizaLogger.debug("ADVERTISE_SERVICES action is only allowed when interacting with the direct client. This message was from:", message.content.source);
+            elizaLogger.debug("SELL_SERVICES action is only allowed when interacting with the direct client. This message was from:", message.content.source);
             return false;
         }
         return true;
@@ -128,38 +100,7 @@ const advertiseServicesAction: Action = {
                 if (callback) {
                     callback({
                         text: extractedServices.result,
-                        action: "ADVERTISE_SERVICES",
-                        source: message.content.source,
-                    });
-                }
-                return false;
-            }
-
-            // Confirm with the user that these are the only services they are selling
-            state.services = extractedServices.result.map((service: any) =>
-                `Name: ${service.name}\nDescription: ${service.description}\nPrice: ${service.price}`
-            ).join('\n\n');
-            const confirmServicesContext = composeContext({
-                state,
-                template: confirmServicesTemplate,
-            });
-
-            const confirmServicesText = await generateText({
-                runtime,
-                context: confirmServicesContext,
-                modelClass: ModelClass.SMALL,
-            });
-
-            elizaLogger.debug("confirmation from the user:", confirmServicesText);
-            const confirmServices = JSON.parse(cleanJsonResponse(confirmServicesText));
-
-            // Validate confirmation
-            if (confirmServices.success === false || confirmServices.success === "false") {
-                elizaLogger.info("Need confirmation from the user.");
-                if (callback) {
-                    callback({
-                        text: confirmServices.result,
-                        action: "ADVERTISE_SERVICES",
+                        action: "SELL_SERVICES",
                         source: message.content.source,
                     });
                 }
@@ -177,8 +118,23 @@ const advertiseServicesAction: Action = {
 
             // publish the service ad to IPFS
             elizaLogger.debug("Publishing service ad to IPFS:", serviceAd);
-            const result = await payAIClient.serviceAdsDB.put(serviceAd);
-            const CID = getCIDFromOrbitDbHash(result);
+            await payAIClient.serviceAdsDB.put(serviceAd);
+            
+            // fetch the service ad from the serviceAdsDB
+            elizaLogger.debug("Fetching the service ad from the serviceAdsDB");
+            const results = await queryOrbitDbReturningCompleteEntries(
+                payAIClient.serviceAdsDB,
+                (doc: any) => {
+                    return (
+                        doc.message.toString() === serviceAd.message.toString() &&
+                        doc.signature === serviceAd.signature
+                    );
+                }
+            );
+            elizaLogger.debug("Found the service ad from the serviceAdsDB:", results);
+            const result = results[0];
+
+            const CID = getCIDFromOrbitDbHash(result.hash);
             elizaLogger.info("Published Service Ad to IPFS: ", CID);
 
             let responseToUser = `Successfully advertised your services. Your Service Ad's IPFS CID is ${CID}`;
@@ -191,7 +147,7 @@ const advertiseServicesAction: Action = {
                     roomId: message.roomId,
                     content: {
                         text: responseToUser,
-                        action: "ADVERTISE_SERVICES",
+                        action: "SELL_SERVICES",
                         source: message.content.source,
                         services: extractedServices.result,
                     },
@@ -206,12 +162,12 @@ const advertiseServicesAction: Action = {
             return true;
 
         } catch (error) {
-            elizaLogger.error('Error in ADVERTISE_SERVICES handler:', error);
+            elizaLogger.error('Error in SELL_SERVICES handler:', error);
             console.error(error);
             if (callback) {
                 callback({
-                    text: "Error processing ADVERTISE_SERVICES request.",
-                    action: "ADVERTISE_SERVICES",
+                    text: "Error processing SELL_SERVICES request.",
+                    action: "SELL_SERVICES",
                     source: message.content.source,
                 });
             }
@@ -223,6 +179,19 @@ const advertiseServicesAction: Action = {
             {
                 user: "{{user1}}",
                 content: {
+                    text: "I want to sell my services."
+                },
+            },
+            {
+                user: "{{user2}}",
+                content: {
+                    text: "Okay! Please tell me more about the services you want to sell. Can you tell me the name, description, and price?",
+                    action: "SELL_SERVICES"
+                },
+            },            
+            {
+                user: "{{user1}}",
+                content: {
                     text: "I want to sell web development services for $50 per hour."
                 },
             },
@@ -230,7 +199,7 @@ const advertiseServicesAction: Action = {
                 user: "{{user2}}",
                 content: {
                     text: "Successfully advertised your services. Your Service Ad's IPFS CID is bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi",
-                    action: "ADVERTISE_SERVICES"
+                    action: "SELL_SERVICES"
                 },
             },
         ],
@@ -245,7 +214,7 @@ const advertiseServicesAction: Action = {
                 user: "{{user2}}",
                 content: {
                     text: "Please provide the services you want to sell, including the name, description, and price.",
-                    action: "ADVERTISE_SERVICES"
+                    action: "SELL_SERVICES"
                 },
             }
         ]

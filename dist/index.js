@@ -2,8 +2,8 @@
 import { elizaLogger } from "@elizaos/core";
 import { createHelia } from "helia";
 import { createLibp2p } from "libp2p";
-import { CID } from "multiformats/cid";
-import { base58btc } from "multiformats/bases/base58";
+import { CID as CID2 } from "multiformats/cid";
+import { base58btc as base58btc2 } from "multiformats/bases/base58";
 import { createOrbitDB } from "@orbitdb/core";
 import { FsBlockstore } from "blockstore-fs";
 import { LevelDatastore } from "datastore-level";
@@ -78,6 +78,8 @@ import {
   createKeyPairFromPrivateKeyBytes,
   verifySignature
 } from "@solana/web3.js";
+import { CID } from "multiformats/cid";
+import { base58btc } from "multiformats/bases/base58";
 async function getSolanaKeypair(base58PrivateKey) {
   let secretKeyBytes = bs58.decode(base58PrivateKey);
   if (secretKeyBytes.length === 64) {
@@ -120,6 +122,7 @@ async function verifyMessage(identity, signature, message) {
   return verifySignature(publicKey, decodedSignature, hash);
 }
 function getCIDFromOrbitDbHash(hash) {
+  return CID.parse(hash, base58btc).toString();
   return hash;
 }
 async function prepareBuyOffer(offerDetails, runtime) {
@@ -199,6 +202,14 @@ async function queryOrbitDbReturningCompleteEntries(db, findFunction) {
   }
   return results;
 }
+async function getAllDbEntriesWithCIDs(db) {
+  const results = [];
+  for await (const doc of db.iterator()) {
+    doc.cid = getCIDFromOrbitDbHash(doc.hash);
+    results.push(doc);
+  }
+  return results;
+}
 
 // src/clients/client.ts
 var {
@@ -237,6 +248,7 @@ var PayAIClient = class {
       this.updatesDB.events.on("update", async (entry) => {
         elizaLogger.debug("payai updates db: ", entry.payload.value);
       });
+      await this.updatesDB.add(`Agent ${runtime.character.name} joined the payai network`);
       this.serviceAdsDB = await this.orbitdb.open(bootstrap_default.databases.serviceAds, { sync: true });
       this.serviceAdsDB.events.on("update", async (entry) => {
         elizaLogger.debug("payai service ads db: ", entry.payload.value);
@@ -249,7 +261,6 @@ var PayAIClient = class {
       this.agreementsDB.events.on("update", async (entry) => {
         elizaLogger.debug("payai agreements db: ", entry.payload.value);
       });
-      await this.updatesDB.add(`Agent ${runtime.character.name} joined the payai network`);
       this.servicesConfigPath = `${agentDir}/sellerServices.json`;
       await this.initSellerAgentFunctionality(runtime);
       elizaLogger.info("PayAI Client initialized");
@@ -280,7 +291,7 @@ var PayAIClient = class {
         const result = await this.serviceAdsDB.put(localServiceAd);
         this.sellerServiceAdCID = getCIDFromOrbitDbHash(result);
         elizaLogger.info("Added new service to serviceAdsDB");
-        elizaLogger.info("CID: ", CID.parse(result, base58btc).toString());
+        elizaLogger.info("CID: ", CID2.parse(result, base58btc2).toString());
       } else {
         this.sellerServiceAdCID = getCIDFromOrbitDbHash(fetchedServiceAds[0].hash);
         elizaLogger.info("Local services marches serviceAdsDB, no need to update the database");
@@ -433,14 +444,14 @@ Service Name
 Service Description
 Service Price
 Seller: B2imQsisfrTLoXxzgQfxtVJ3vQR9bGbpmyocVu3nWGJ6
-Service Ad CID: zdpuAuhwXA4NGv5Qqc6nFHPjHtFxcqnYRSGyW1FBCkrfm2tgF
+Service Ad CID: bafyreifo4inpuekp466muw2bmldqkg6zetiwi6psjyiwzzyz35bsmcvhrq
 Service ID
 
 Service Name
 Service Description
 Service Price
 Seller: updtkJ8HAhh3rSkBCd3p9Z1Q74yJW4rMhSbScRskDPM
-Service Ad CID: zdpuAn5qVvoT1h2KfwNxZehFnNotCdBeEgVFGYTBuSEyKPtDB
+Service Ad CID: bafyreifo4inpuekp46zetiwi6psjyiwzzyz35bsmcvhrq6muw2bmldqkg6
 Service ID"
 }
 
@@ -469,7 +480,9 @@ var browseAgents = {
       } else {
         state = await runtime.updateRecentMessageState(state);
       }
-      const services = await payAIClient.serviceAdsDB.all();
+      const services = await getAllDbEntriesWithCIDs(
+        payAIClient.serviceAdsDB
+      );
       const servicesString = JSON.stringify(services, null, 2);
       state.services = servicesString;
       state.searchQuery = searchQuery;
@@ -477,6 +490,7 @@ var browseAgents = {
         state,
         template: findMatchingServicesTemplate
       });
+      console.log("findMatchingServicesContext", findMatchingServicesContext);
       const findMatchingServicesContent = await generateText({
         runtime,
         context: findMatchingServicesContext,
@@ -654,11 +668,11 @@ var makeOfferAction = {
       const buyOffer = await prepareBuyOffer(offerDetails, runtime);
       elizaLogger3.debug("Publishing buy offer to IPFS:", buyOffer);
       const result = await payAIClient.buyOffersDB.put(buyOffer);
-      const CID2 = getCIDFromOrbitDbHash(result);
-      elizaLogger3.info("Published Buy Offer to IPFS: ", CID2);
+      const CID3 = getCIDFromOrbitDbHash(result);
+      elizaLogger3.info("Published Buy Offer to IPFS: ", CID3);
       let responseToUser = `Successfully made an offer for ${offerDetails.desiredUnitAmount} units of service ID ${offerDetails.desiredServiceID} from seller ${extractedDetails.result.wallet}.`;
       responseToUser += `
-Your Buy Offer's IPFS CID is ${CID2}`;
+Your Buy Offer's IPFS CID is ${CID3}`;
       if (callback) {
         const newMemory = {
           userId: message.agentId,
@@ -857,9 +871,9 @@ var acceptOfferAction = {
       const agreement = await prepareAgreement(agreementDetails, runtime);
       elizaLogger4.debug("Publishing agreement to IPFS:", agreement);
       const result = await payAIClient.agreementsDB.put(agreement);
-      const CID2 = getCIDFromOrbitDbHash(result);
-      elizaLogger4.info("Published Agreement to IPFS: ", CID2);
-      let responseToUser = `I accepted the offer and signed an agreement. The Agreement's IPFS CID is ${CID2}`;
+      const CID3 = getCIDFromOrbitDbHash(result);
+      elizaLogger4.info("Published Agreement to IPFS: ", CID3);
+      let responseToUser = `I accepted the offer and signed an agreement. The Agreement's IPFS CID is ${CID3}`;
       if (callback) {
         const newMemory = {
           userId: message.agentId,
@@ -1000,72 +1014,42 @@ var extractServicesTemplate = `
 Analyze the following conversation to extract the services that the user wants to sell.
 There could be multiple services, so make sure you extract all of them.
 
-{{recentMessages}}
-
 Return a JSON object containing only the fields where information was clearly found.
+
 For example:
 {
     "success": true,
     "result": [
         {
-            "name": "First Service Name",
-            "description": "First Service Description",
-            "price": "First Service Price"
-        },
-        {
-            "name": "Second Service Name",
-            "description": "Second Service Description",
-            "price": "Second Service Price"
+            "name": "Service Name",
+            "description": "Service Description",
+            "price": "Service Price"
         }
     ]
 }
 
-If the user did not provide enough information, then set the "success" field to false and set the result to a string asking the user to provide the missing information. If asking for missing information, be natural and polite.
+If the user did not provide enough information for any of the fields, then set the "success" field to false and set the result to a string asking the user to provide the missing information. 
+Be natural and polite when asking for missing information.
 For example, if you could not find the services, then return:
 {
     "success": false,
-    "result": "A natural message asking the user to provide information on the services they want to sell."
+    "result": "feedback message"
 }
 
-Only return a JSON mardown block.
-`;
-var confirmServicesTemplate = `
-Look for confirmation from the user that the following services are the only ones they are selling at the moment.
-
-{{services}}
-
-User's recent messages are below.
+The conversation is below
 
 {{recentMessages}}
-
-
-Return a JSON object containing only the fields where information was clearly found.
-If the user confirmed, then set the "success" field to true and set the result to "yes".
-For example:
-{
-    "success": true,
-    "result": "yes"
-}
-
-If the user did not confirm, then set the "success" field to false and set the result to a string asking the user to confirm.
-For example, if you could not find the confirmation, then return:
-{
-    "success": false,
-    "result": "Please confirm that these are the only services you are selling at the moment:
-
-{{services}}"
-}
 
 Only return a JSON mardown block.
 `;
 var advertiseServicesAction = {
-  name: "ADVERTISE_SERVICES",
-  similes: ["SELL_SERVICES", "OFFER_SERVICES", "LIST_SERVICES"],
+  name: "SELL_SERVICES",
+  similes: ["ADVERTISE_SERVICES", "OFFER_SERVICES", "LIST_SERVICES"],
   description: "Ask the user for the services they want to sell, create the services file locally, and publish it to the serviceAdsDB.",
   suppressInitialMessage: true,
   validate: async (runtime, message) => {
     if (message.content.source !== "direct") {
-      elizaLogger5.debug("ADVERTISE_SERVICES action is only allowed when interacting with the direct client. This message was from:", message.content.source);
+      elizaLogger5.debug("SELL_SERVICES action is only allowed when interacting with the direct client. This message was from:", message.content.source);
       return false;
     }
     return true;
@@ -1094,34 +1078,7 @@ var advertiseServicesAction = {
         if (callback) {
           callback({
             text: extractedServices.result,
-            action: "ADVERTISE_SERVICES",
-            source: message.content.source
-          });
-        }
-        return false;
-      }
-      state.services = extractedServices.result.map(
-        (service) => `Name: ${service.name}
-Description: ${service.description}
-Price: ${service.price}`
-      ).join("\n\n");
-      const confirmServicesContext = composeContext4({
-        state,
-        template: confirmServicesTemplate
-      });
-      const confirmServicesText = await generateText4({
-        runtime,
-        context: confirmServicesContext,
-        modelClass: ModelClass4.SMALL
-      });
-      elizaLogger5.debug("confirmation from the user:", confirmServicesText);
-      const confirmServices = JSON.parse(cleanJsonResponse4(confirmServicesText));
-      if (confirmServices.success === false || confirmServices.success === "false") {
-        elizaLogger5.info("Need confirmation from the user.");
-        if (callback) {
-          callback({
-            text: confirmServices.result,
-            action: "ADVERTISE_SERVICES",
+            action: "SELL_SERVICES",
             source: message.content.source
           });
         }
@@ -1133,10 +1090,19 @@ Price: ${service.price}`
       elizaLogger5.info("Created services file locally at:", servicesFilePath);
       const serviceAd = await prepareServiceAd(extractedServices.result, runtime);
       elizaLogger5.debug("Publishing service ad to IPFS:", serviceAd);
-      const result = await payAIClient.serviceAdsDB.put(serviceAd);
-      const CID2 = getCIDFromOrbitDbHash(result);
-      elizaLogger5.info("Published Service Ad to IPFS: ", CID2);
-      let responseToUser = `Successfully advertised your services. Your Service Ad's IPFS CID is ${CID2}`;
+      await payAIClient.serviceAdsDB.put(serviceAd);
+      elizaLogger5.debug("Fetching the service ad from the serviceAdsDB");
+      const results = await queryOrbitDbReturningCompleteEntries(
+        payAIClient.serviceAdsDB,
+        (doc) => {
+          return doc.message.toString() === serviceAd.message.toString() && doc.signature === serviceAd.signature;
+        }
+      );
+      elizaLogger5.debug("Found the service ad from the serviceAdsDB:", results);
+      const result = results[0];
+      const CID3 = getCIDFromOrbitDbHash(result.hash);
+      elizaLogger5.info("Published Service Ad to IPFS: ", CID3);
+      let responseToUser = `Successfully advertised your services. Your Service Ad's IPFS CID is ${CID3}`;
       if (callback) {
         const newMemory = {
           userId: message.agentId,
@@ -1144,7 +1110,7 @@ Price: ${service.price}`
           roomId: message.roomId,
           content: {
             text: responseToUser,
-            action: "ADVERTISE_SERVICES",
+            action: "SELL_SERVICES",
             source: message.content.source,
             services: extractedServices.result
           },
@@ -1155,12 +1121,12 @@ Price: ${service.price}`
       }
       return true;
     } catch (error) {
-      elizaLogger5.error("Error in ADVERTISE_SERVICES handler:", error);
+      elizaLogger5.error("Error in SELL_SERVICES handler:", error);
       console.error(error);
       if (callback) {
         callback({
-          text: "Error processing ADVERTISE_SERVICES request.",
-          action: "ADVERTISE_SERVICES",
+          text: "Error processing SELL_SERVICES request.",
+          action: "SELL_SERVICES",
           source: message.content.source
         });
       }
@@ -1172,6 +1138,19 @@ Price: ${service.price}`
       {
         user: "{{user1}}",
         content: {
+          text: "I want to sell my services."
+        }
+      },
+      {
+        user: "{{user2}}",
+        content: {
+          text: "Okay! Please tell me more about the services you want to sell. Can you tell me the name, description, and price?",
+          action: "SELL_SERVICES"
+        }
+      },
+      {
+        user: "{{user1}}",
+        content: {
           text: "I want to sell web development services for $50 per hour."
         }
       },
@@ -1179,7 +1158,7 @@ Price: ${service.price}`
         user: "{{user2}}",
         content: {
           text: "Successfully advertised your services. Your Service Ad's IPFS CID is bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi",
-          action: "ADVERTISE_SERVICES"
+          action: "SELL_SERVICES"
         }
       }
     ],
@@ -1194,7 +1173,7 @@ Price: ${service.price}`
         user: "{{user2}}",
         content: {
           text: "Please provide the services you want to sell, including the name, description, and price.",
-          action: "ADVERTISE_SERVICES"
+          action: "SELL_SERVICES"
         }
       }
     ]

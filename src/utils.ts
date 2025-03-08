@@ -6,6 +6,8 @@ import {
     verifySignature,
     SignatureBytes
 } from '@solana/web3.js';
+import { CID } from 'multiformats/cid';
+import { base58btc } from 'multiformats/bases/base58';
 import { IAgentRuntime } from '@elizaos/core';
 
 /**
@@ -115,8 +117,17 @@ export async function verifyMessage(identity: string, signature: string, message
  */
 export function getCIDFromOrbitDbHash(hash: string): string {
     // TODO return the CID once the PayAI entries are available from publicly accessible IPFS nodes
-    // return CID.parse(hash, base58btc).toString();
+    return CID.parse(hash, base58btc).toString();
     return hash;
+}
+
+/**
+ * Get the CID object of an OrbitDB hash.
+ * @param hash - The OrbitDB entry's hash.
+ * @returns The IPFS CID object of the OrbitDB entry.
+ */
+export function getCIDObjectFromOrbitDbHash(hash: string): CID {
+    return CID.parse(hash, base58btc);
 }
 
 /**
@@ -238,6 +249,21 @@ export async function queryOrbitDbReturningCompleteEntries(db: any, findFunction
         if (findFunction(doc.value)) {
             results.push(doc)
         }
+    }
+    return results
+}
+
+/**
+ * Return all entries in an orbitdb database, adding to it the ipfs cid.
+ * @param db - The orbitdb database to query.
+ * @returns All entries in the database with the ipfs cid attached.
+ */
+export async function getAllDbEntriesWithCIDs(db: any): Promise<any> {
+    const results = []
+
+    for await (const doc of db.iterator()) {
+        doc.cid = getCIDFromOrbitDbHash(doc.hash)
+        results.push(doc)
     }
     return results
 }
