@@ -1,0 +1,7 @@
+src/
+images/
+tests/
+examples/
+.gitignore
+pnpm-lock.yaml
+tsconfig.json

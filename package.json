@@ -12,6 +12,7 @@
   },
   "license": "MIT",
   "author": "Notorious D.E.V",
+  "keywords": ["elizaos-plugins", "AI", "web3", "crypto", "solana", "agentic ai", "payai"],
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",
