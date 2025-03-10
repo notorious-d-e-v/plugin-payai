@@ -116,9 +116,7 @@ export async function verifyMessage(identity: string, signature: string, message
  * @returns The IPFS CID of the OrbitDB entry.
  */
 export function getCIDFromOrbitDbHash(hash: string): string {
-    // TODO return the CID once the PayAI entries are available from publicly accessible IPFS nodes
     return CID.parse(hash, base58btc).toString();
-    return hash;
 }
 
 /**
@@ -247,6 +245,7 @@ export async function queryOrbitDbReturningCompleteEntries(db: any, findFunction
 
     for await (const doc of db.iterator()) {
         if (findFunction(doc.value)) {
+            doc.cid = getCIDFromOrbitDbHash(doc.hash)
             results.push(doc)
         }
     }

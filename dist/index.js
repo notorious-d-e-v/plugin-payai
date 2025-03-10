@@ -32,7 +32,6 @@ var bootstrap_default = {
 };
 
 // src/config/libp2p.ts
-console.log("bootstrapConfig.addresses: ", bootstrap_default.addresses);
 var libp2pOptions = {
   peerStore: {
     persistence: true,
@@ -123,7 +122,6 @@ async function verifyMessage(identity, signature, message) {
 }
 function getCIDFromOrbitDbHash(hash) {
   return CID.parse(hash, base58btc).toString();
-  return hash;
 }
 async function prepareBuyOffer(offerDetails, runtime) {
   try {
@@ -197,6 +195,7 @@ async function queryOrbitDbReturningCompleteEntries(db, findFunction) {
   const results = [];
   for await (const doc of db.iterator()) {
     if (findFunction(doc.value)) {
+      doc.cid = getCIDFromOrbitDbHash(doc.hash);
       results.push(doc);
     }
   }
@@ -278,7 +277,7 @@ var PayAIClient = class {
   async initSellerAgentFunctionality(runtime) {
     if (fs.existsSync(this.servicesConfigPath)) {
       const localServices = JSON.parse(fs.readFileSync(this.servicesConfigPath, "utf-8"));
-      this.servicesConfig = localServices;
+      this.setServicesConfig(localServices);
       const localServiceAd = await prepareServiceAd(localServices, runtime);
       const fetchedServiceAds = await queryOrbitDbReturningCompleteEntries(
         this.serviceAdsDB,
@@ -288,10 +287,7 @@ var PayAIClient = class {
       );
       if (fetchedServiceAds.length === 0) {
         elizaLogger.info("Local services does not match serviceAdsDB, adding to database");
-        const result = await this.serviceAdsDB.put(localServiceAd);
-        this.sellerServiceAdCID = getCIDFromOrbitDbHash(result);
-        elizaLogger.info("Added new service to serviceAdsDB");
-        elizaLogger.info("CID: ", CID2.parse(result, base58btc2).toString());
+        await this.publishPreparedServiceAd(localServiceAd);
       } else {
         this.sellerServiceAdCID = getCIDFromOrbitDbHash(fetchedServiceAds[0].hash);
         elizaLogger.info("Local services marches serviceAdsDB, no need to update the database");
@@ -338,6 +334,39 @@ var PayAIClient = class {
     }
   }
   /*
+   * Sets the servicesConfig.
+   * Should be called anytime the sellerServices.json file is updated.
+   */
+  setServicesConfig(servicesConfig) {
+    this.servicesConfig = servicesConfig;
+  }
+  /*
+   * Writes the services to the sellerServices.json file.
+   * Updates the servicesConfig in memory.
+   */
+  saveSellerServices(services) {
+    fs.writeFileSync(this.servicesConfigPath, services);
+    this.setServicesConfig(services);
+  }
+  /*
+   * Publishes a service ad to the PayAI network.
+   * Updates the sellerServiceAdCID in memory.
+   * @param serviceAd - The service ad to publish.
+   * @returns The IPFS CID of the published service ad.
+   */
+  async publishPreparedServiceAd(serviceAd) {
+    try {
+      const hash = await this.serviceAdsDB.put(serviceAd);
+      const cid = getCIDFromOrbitDbHash(hash);
+      this.sellerServiceAdCID = cid;
+      elizaLogger.info("Published service ad to IPFS:", this.sellerServiceAdCID);
+      return this.sellerServiceAdCID;
+    } catch (error) {
+      elizaLogger.error("Error publishing prepared service ad", error);
+      throw error;
+    }
+  }
+  /*
    * Function to get an OrbitDB entry using its hash.
    */
   async getEntryFromHash(hash, db) {
@@ -349,10 +378,10 @@ var PayAIClient = class {
       throw error;
     }
   }
-  // TODO this will change once PayAI content is available from publicly accessible IPFS nodes
   /* Function to get an OrbitDB entry using its ipfs CID. */
   async getEntryFromCID(cid, db) {
-    return this.getEntryFromHash(cid, db);
+    const hash = CID2.parse(cid).toString(base58btc2);
+    return this.getEntryFromHash(hash, db);
   }
   /*
    * Close the OrbitDB databases.
@@ -490,7 +519,6 @@ var browseAgents = {
         state,
         template: findMatchingServicesTemplate
       });
-      console.log("findMatchingServicesContext", findMatchingServicesContext);
       const findMatchingServicesContent = await generateText({
         runtime,
         context: findMatchingServicesContext,
@@ -973,7 +1001,6 @@ var acceptOfferAction = {
 async function isValidBuyOffer(buyOfferCID, runtime) {
   try {
     const buyOffer = (await payAIClient.getEntryFromCID(buyOfferCID, payAIClient.buyOffersDB)).payload.value;
-    ;
     const identity = buyOffer.identity;
     const signature = buyOffer.signature;
     const message = buyOffer.message;
@@ -981,7 +1008,7 @@ async function isValidBuyOffer(buyOfferCID, runtime) {
     if (!isValidSignature) {
       return { isValid: false, reason: "Buy Offer signature is invalid." };
     }
-    const serviceAd = await payAIClient.getEntryFromHash(message.serviceAdCID, payAIClient.serviceAdsDB);
+    const serviceAd = await payAIClient.getEntryFromCID(message.serviceAdCID, payAIClient.serviceAdsDB);
     if (!serviceAd) {
       return { isValid: false, reason: "ServiceAd referenced by Buy Offer does not exist" };
     }
@@ -1009,7 +1036,6 @@ import {
   getEmbeddingZeroVector as getEmbeddingZeroVector4,
   cleanJsonResponse as cleanJsonResponse4
 } from "@elizaos/core";
-import fs2 from "fs";
 var extractServicesTemplate = `
 Analyze the following conversation to extract the services that the user wants to sell.
 There could be multiple services, so make sure you extract all of them.
@@ -1085,23 +1111,11 @@ var advertiseServicesAction = {
         return false;
       }
       const servicesFilePath = payAIClient.servicesConfigPath;
-      elizaLogger5.debug("writing the following services to the services file:", extractedServices.result);
-      fs2.writeFileSync(servicesFilePath, JSON.stringify(extractedServices.result, null, 2));
-      elizaLogger5.info("Created services file locally at:", servicesFilePath);
+      elizaLogger5.debug("Updating the services file with the seller's services");
+      payAIClient.saveSellerServices(JSON.stringify(extractedServices.result, null, 2));
+      elizaLogger5.info("Updated services file locally at:", servicesFilePath);
       const serviceAd = await prepareServiceAd(extractedServices.result, runtime);
-      elizaLogger5.debug("Publishing service ad to IPFS:", serviceAd);
-      await payAIClient.serviceAdsDB.put(serviceAd);
-      elizaLogger5.debug("Fetching the service ad from the serviceAdsDB");
-      const results = await queryOrbitDbReturningCompleteEntries(
-        payAIClient.serviceAdsDB,
-        (doc) => {
-          return doc.message.toString() === serviceAd.message.toString() && doc.signature === serviceAd.signature;
-        }
-      );
-      elizaLogger5.debug("Found the service ad from the serviceAdsDB:", results);
-      const result = results[0];
-      const CID3 = getCIDFromOrbitDbHash(result.hash);
-      elizaLogger5.info("Published Service Ad to IPFS: ", CID3);
+      const CID3 = await payAIClient.publishPreparedServiceAd(serviceAd);
       let responseToUser = `Successfully advertised your services. Your Service Ad's IPFS CID is ${CID3}`;
       if (callback) {
         const newMemory = {

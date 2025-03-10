@@ -13,7 +13,7 @@ import {
 } from '@elizaos/core';
 import fs from 'fs';
 import { payAIClient } from '../clients/client.ts';
-import { prepareServiceAd, getCIDFromOrbitDbHash, queryOrbitDbReturningCompleteEntries } from '../utils.ts';
+import { prepareServiceAd, getCIDFromOrbitDbHash, queryOrbitDbReturningCompleteEntries, getAllDbEntriesWithCIDs } from '../utils.ts';
 
 
 
@@ -109,34 +109,15 @@ const advertiseServicesAction: Action = {
 
             // create the services file locally
             const servicesFilePath = payAIClient.servicesConfigPath;
-            elizaLogger.debug("writing the following services to the services file:", extractedServices.result);
-            fs.writeFileSync(servicesFilePath, JSON.stringify(extractedServices.result, null, 2));
-            elizaLogger.info("Created services file locally at:", servicesFilePath);
+            elizaLogger.debug("Updating the services file with the seller's services");
+            payAIClient.saveSellerServices(JSON.stringify(extractedServices.result, null, 2));
+            elizaLogger.info("Updated services file locally at:", servicesFilePath);
 
             // prepare the service ad
             const serviceAd = await prepareServiceAd(extractedServices.result, runtime);
 
             // publish the service ad to IPFS
-            elizaLogger.debug("Publishing service ad to IPFS:", serviceAd);
-            await payAIClient.serviceAdsDB.put(serviceAd);
-            
-            // fetch the service ad from the serviceAdsDB
-            elizaLogger.debug("Fetching the service ad from the serviceAdsDB");
-            const results = await queryOrbitDbReturningCompleteEntries(
-                payAIClient.serviceAdsDB,
-                (doc: any) => {
-                    return (
-                        doc.message.toString() === serviceAd.message.toString() &&
-                        doc.signature === serviceAd.signature
-                    );
-                }
-            );
-            elizaLogger.debug("Found the service ad from the serviceAdsDB:", results);
-            const result = results[0];
-
-            const CID = getCIDFromOrbitDbHash(result.hash);
-            elizaLogger.info("Published Service Ad to IPFS: ", CID);
-
+            const CID = await payAIClient.publishPreparedServiceAd(serviceAd);
             let responseToUser = `Successfully advertised your services. Your Service Ad's IPFS CID is ${CID}`;
 
             if (callback) {

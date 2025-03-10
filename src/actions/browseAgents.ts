@@ -86,7 +86,7 @@ const browseAgents: Action = {
                 state = await runtime.updateRecentMessageState(state);
             }
 
-            // query for all services in the database            
+            // query for all services in the database
             const services = await getAllDbEntriesWithCIDs(
                 payAIClient.serviceAdsDB
             );
@@ -99,8 +99,6 @@ const browseAgents: Action = {
                 state,
                 template: findMatchingServicesTemplate,
             });
-
-            console.log("findMatchingServicesContext", findMatchingServicesContext);
 
             const findMatchingServicesContent = await generateText({
                 runtime,

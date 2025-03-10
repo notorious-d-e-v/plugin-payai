@@ -14,6 +14,7 @@ import fs from 'fs';
 import {
   getCIDFromOrbitDbHash,
   getCIDObjectFromOrbitDbHash,
+  getAllDbEntriesWithCIDs,
   queryOrbitDbReturningCompleteEntries,
   prepareServiceAd
 } from '../utils.ts';
@@ -109,7 +110,7 @@ class PayAIClient implements Client {
       // load the services from the sellerServices.json if the file exists
       if (fs.existsSync(this.servicesConfigPath)) {
         const localServices = JSON.parse(fs.readFileSync(this.servicesConfigPath, 'utf-8'));
-        this.servicesConfig = localServices;
+        this.setServicesConfig(localServices);
 
         // check if the service already exists in the serviceAdsDB
         const localServiceAd = await prepareServiceAd(localServices, runtime);
@@ -126,10 +127,7 @@ class PayAIClient implements Client {
         // if the service does not exist in the serviceAdsDB, add it
         if (fetchedServiceAds.length === 0) {
           elizaLogger.info('Local services does not match serviceAdsDB, adding to database');
-          const result = await this.serviceAdsDB.put(localServiceAd);
-          this.sellerServiceAdCID = getCIDFromOrbitDbHash(result);
-          elizaLogger.info('Added new service to serviceAdsDB');
-          elizaLogger.info("CID: ", CID.parse(result, base58btc).toString());
+          await this.publishPreparedServiceAd(localServiceAd);
         } else {
           this.sellerServiceAdCID = getCIDFromOrbitDbHash(fetchedServiceAds[0].hash);
           elizaLogger.info('Local services marches serviceAdsDB, no need to update the database');
@@ -188,6 +186,47 @@ class PayAIClient implements Client {
   }
 
   /*
+   * Sets the servicesConfig.
+   * Should be called anytime the sellerServices.json file is updated.
+   */
+  private setServicesConfig(servicesConfig: any): void {
+    this.servicesConfig = servicesConfig;
+  }
+
+  /*
+   * Writes the services to the sellerServices.json file.
+   * Updates the servicesConfig in memory.
+   */
+  public saveSellerServices(services: any): void {
+    fs.writeFileSync(this.servicesConfigPath, services);
+    this.setServicesConfig(services);
+  }
+
+  /*
+   * Publishes a service ad to the PayAI network.
+   * Updates the sellerServiceAdCID in memory.
+   * @param serviceAd - The service ad to publish.
+   * @returns The IPFS CID of the published service ad.
+   */
+  public async publishPreparedServiceAd(serviceAd: any): Promise<string> {
+    try {
+      // publish the ad
+      const hash = await this.serviceAdsDB.put(serviceAd);
+      
+      // update the service ad cid in memory
+      const cid = getCIDFromOrbitDbHash(hash);
+      this.sellerServiceAdCID = cid;      
+      
+      elizaLogger.info('Published service ad to IPFS:', this.sellerServiceAdCID);
+      return this.sellerServiceAdCID;
+    }
+    catch (error) {
+      elizaLogger.error('Error publishing prepared service ad', error);
+      throw error;
+    }
+  }
+
+  /*
    * Function to get an OrbitDB entry using its hash.
    */
     public async getEntryFromHash(hash: string, db: any): Promise<any> {
@@ -200,10 +239,10 @@ class PayAIClient implements Client {
         }
     }
 
-    // TODO this will change once PayAI content is available from publicly accessible IPFS nodes
     /* Function to get an OrbitDB entry using its ipfs CID. */
     public async getEntryFromCID(cid: string, db: any): Promise<any> {
-        return this.getEntryFromHash(cid, db);
+      const hash = CID.parse(cid).toString(base58btc);
+      return this.getEntryFromHash(hash, db);
     }
 
   /*

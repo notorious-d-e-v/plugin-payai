@@ -10,7 +10,6 @@ import { dataDir } from '../datadir'
 import bootstrapConfig from './bootstrap.json'
 
 
-console.log("bootstrapConfig.addresses: ", bootstrapConfig.addresses);
 /**
  * A basic Libp2p configuration for Node.js nodes.
  */

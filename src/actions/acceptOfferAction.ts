@@ -237,7 +237,7 @@ const acceptOfferAction: Action = {
 async function isValidBuyOffer(buyOfferCID: string, runtime: IAgentRuntime) {
     try {
         // get the buy offer from the buyOffersDB
-        const buyOffer = (await payAIClient.getEntryFromCID(buyOfferCID, payAIClient.buyOffersDB)).payload.value;;
+        const buyOffer = (await payAIClient.getEntryFromCID(buyOfferCID, payAIClient.buyOffersDB)).payload.value;
 
         // verify the signature of the message using the identity
         const identity = buyOffer.identity;
@@ -249,7 +249,7 @@ async function isValidBuyOffer(buyOfferCID: string, runtime: IAgentRuntime) {
         }
 
         // look up the serviceAd that the buy offer references
-        const serviceAd = await payAIClient.getEntryFromHash(message.serviceAdCID, payAIClient.serviceAdsDB);
+        const serviceAd = await payAIClient.getEntryFromCID(message.serviceAdCID, payAIClient.serviceAdsDB);
 
         // verify that the serviceAd exists
         if (!serviceAd) {
