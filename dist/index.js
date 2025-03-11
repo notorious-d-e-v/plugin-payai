@@ -294,11 +294,6 @@ var PayAIClient = class {
       }
     }
     await this.checkServicesConfig(runtime);
-    this.servicesConfigInterval = setInterval(() => {
-      this.checkServicesConfig(runtime).catch((error) => {
-        elizaLogger.error("Error in servicesConfigInterval", error);
-      });
-    }, 2e4);
   }
   readAndParseServicesConfig() {
     try {

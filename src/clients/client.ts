@@ -137,11 +137,13 @@ class PayAIClient implements Client {
       // start a periodic check for updates to the sellerServices.json file
       // in case the seller agent changes their local services
       await this.checkServicesConfig(runtime);
+      /*
       this.servicesConfigInterval = setInterval(() => {
         this.checkServicesConfig(runtime).catch(error => {
           elizaLogger.error('Error in servicesConfigInterval', error);
         });
       }, 20000);
+      */
     }
 
   private readAndParseServicesConfig(): any {
