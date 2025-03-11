@@ -107,18 +107,18 @@ const advertiseServicesAction: Action = {
                 return false;
             }
 
-            // create the services file locally
-            const servicesFilePath = payAIClient.servicesConfigPath;
-            elizaLogger.debug("Updating the services file with the seller's services");
-            payAIClient.saveSellerServices(JSON.stringify(extractedServices.result, null, 2));
-            elizaLogger.info("Updated services file locally at:", servicesFilePath);
-
             // prepare the service ad
             const serviceAd = await prepareServiceAd(extractedServices.result, runtime);
 
             // publish the service ad to IPFS
             const CID = await payAIClient.publishPreparedServiceAd(serviceAd);
             let responseToUser = `Successfully advertised your services. Your Service Ad's IPFS CID is ${CID}`;
+
+            // create the services file locally
+            const servicesFilePath = payAIClient.servicesConfigPath;
+            elizaLogger.debug("Updating the local services file with the seller's services");
+            payAIClient.saveSellerServices(JSON.stringify(extractedServices.result, null, 2));
+            elizaLogger.info("Updated services file locally at:", servicesFilePath);
 
             if (callback) {
                 // create new memory of the message to the user

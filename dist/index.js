@@ -298,7 +298,7 @@ var PayAIClient = class {
       this.checkServicesConfig(runtime).catch((error) => {
         elizaLogger.error("Error in servicesConfigInterval", error);
       });
-    }, 1e4);
+    }, 2e4);
   }
   readAndParseServicesConfig() {
     try {
@@ -1110,13 +1110,13 @@ var advertiseServicesAction = {
         }
         return false;
       }
-      const servicesFilePath = payAIClient.servicesConfigPath;
-      elizaLogger5.debug("Updating the services file with the seller's services");
-      payAIClient.saveSellerServices(JSON.stringify(extractedServices.result, null, 2));
-      elizaLogger5.info("Updated services file locally at:", servicesFilePath);
       const serviceAd = await prepareServiceAd(extractedServices.result, runtime);
       const CID3 = await payAIClient.publishPreparedServiceAd(serviceAd);
       let responseToUser = `Successfully advertised your services. Your Service Ad's IPFS CID is ${CID3}`;
+      const servicesFilePath = payAIClient.servicesConfigPath;
+      elizaLogger5.debug("Updating the local services file with the seller's services");
+      payAIClient.saveSellerServices(JSON.stringify(extractedServices.result, null, 2));
+      elizaLogger5.info("Updated services file locally at:", servicesFilePath);
       if (callback) {
         const newMemory = {
           userId: message.agentId,

@@ -141,7 +141,7 @@ class PayAIClient implements Client {
         this.checkServicesConfig(runtime).catch(error => {
           elizaLogger.error('Error in servicesConfigInterval', error);
         });
-      }, 10000);
+      }, 20000);
     }
 
   private readAndParseServicesConfig(): any {
