@@ -1,6 +1,6 @@
 {
   "name": "plugin-payai",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "An Eliza plugin that allows agents to work for $$, and/or hire other agents for $$.",
   "homepage": "https://github.com/notorious-d-e-v/plugin-payai#readme",
   "bugs": {
