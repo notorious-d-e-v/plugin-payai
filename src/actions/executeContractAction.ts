@@ -11,9 +11,9 @@ import {
     cleanJsonResponse,
     getEmbeddingZeroVector,
 } from '@elizaos/core';
-import { Program, AnchorProvider, web3, BN } from '@project-serum/anchor';
 import { payAIClient } from '../clients/client.ts';
-import { verifyMessage, getSolanaKeypair, getBase58PublicKeyFromCryptoKey } from '../utils.ts';
+import { paymentClient } from '../payment.ts';
+import { verifyMessage, getSolanaKeypair, getBase58PublicKeyFromCryptoKey, getBase58PublicKey } from '../utils.ts';
 
 interface ContractDetails {
     agreementCID: string;
@@ -109,11 +109,9 @@ const executeContractAction: Action = {
                 }
                 return false;
             }
-
-            // fetch the buy offer from the buyOffersDB
-            const buyOffer = (await payAIClient.getEntryFromCID(agreement.message.BuyerOfferCID, payAIClient.buyOffersDB)).payload.value;;
-
+            
             // verify the signature of the buy offer
+            const buyOffer = (await payAIClient.getEntryFromCID(agreement.message.buyOfferCID, payAIClient.buyOffersDB)).payload.value;;
             const isValidBuyOffer = await verifyMessage(buyOffer.identity, buyOffer.signature, buyOffer.message);
             if (!isValidBuyOffer) {
                 elizaLogger.info("Buy Offer signature is invalid.");
@@ -128,8 +126,7 @@ const executeContractAction: Action = {
             }
 
             // verify that the identity that signed the buy offer is the same as the local keypair
-            const solanaKeypair = await getSolanaKeypair(runtime.getSetting('SOLANA_PRIVATE_KEY'));
-            const base58PublicKey = await getBase58PublicKeyFromCryptoKey(solanaKeypair.publicKey);
+            const base58PublicKey = await getBase58PublicKey(runtime)
             if (buyOffer.identity !== base58PublicKey) {
                 elizaLogger.info("The Buy Offer that this Agreement references was not signed by my keypair.");
                 if (callback) {
@@ -142,8 +139,23 @@ const executeContractAction: Action = {
                 return false;
             }
 
+            // determine the total SOL needed to fund the contract
+            const serviceAd = (await payAIClient.getEntryFromCID(buyOffer.message.serviceAdCID, payAIClient.serviceAdsDB)).payload.value;
+            const priceString = serviceAd.message.services[parseInt(buyOffer.message.desiredServiceID)].price;
+            const priceMatch = priceString.match(/(\d+\.?\d*)/);
+            if (!priceMatch) {
+                throw new Error(`Could not extract price from string: ${priceString}`);
+            }
+            const priceInSOL = parseFloat(priceString);
+            const units = parseInt(buyOffer.message.desiredUnitAmount);
+            const totalSOL = priceInSOL * units;
+
+            // convert SOL to lamports (1 SOL = 1 billion lamports)
+            const lamportsPerSOL = 1_000_000_000;
+            const totalLamports = Math.round(totalSOL * lamportsPerSOL).toString();
+
             // start the contract on Solana
-            // TODO wire up the program.ts file to interact with the payai solana program
+            const tx = await paymentClient.startContract(extractedDetails.result.agreementCID, agreement.identity, totalLamports);
 
             let responseToUser = `Successfully started the contract. You can see the transaction at https://solscan.io/tx/${tx}`;
 
@@ -241,3 +253,5 @@ const executeContractAction: Action = {
         ]
     ],
 };
+
+export default executeContractAction;

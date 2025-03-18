@@ -60,8 +60,11 @@ export async function getBase58PublicKeyFromCryptoKey(publicKey: CryptoKey): Pro
 }
 
 function prepareMessageForHashing(message: object): string {
+    // sort the object by key recursively
+    const sortedMessage = sortObjectByKey(message);
+
     // serialize the message
-    const serializedMessage = JSON.stringify(message);
+    const serializedMessage = JSON.stringify(sortedMessage);
 
     // strip the message of any whitespace before hashing
     return serializedMessage.replace(/\s/g, '');
@@ -213,15 +216,15 @@ export async function prepareAgreement(agreementDetails: any, runtime: IAgentRun
 
         // prepare message using the agreement details
         const message = {
-            ...agreementDetails,
-            identity: base58PublicKey
+            ...agreementDetails
         };
 
         const signature = await hashAndSign(message, solanaKeypair.privateKey);
         const formattedAgreement = {
             message,
+            identity: base58PublicKey,
             signature,
-            _id: signature  // TODO make this more resilient in the future
+            _id: signature
         };
 
         return formattedAgreement;
@@ -265,4 +268,34 @@ export async function getAllDbEntriesWithCIDs(db: any): Promise<any> {
         results.push(doc)
     }
     return results
+}
+
+/**
+ * Get the base58 encoded public key of the user's solana account.
+ * @param runtime - The runtime context for the client.
+ * @returns The base58 encoded public key of the user's solana account.
+ */
+export async function getBase58PublicKey(runtime: IAgentRuntime): Promise<string> {
+    const userDefinedPrivateKey = runtime.getSetting('SOLANA_PRIVATE_KEY')
+    const solanaKeypair = await getSolanaKeypair(userDefinedPrivateKey);
+    return await getBase58PublicKeyFromCryptoKey(solanaKeypair.publicKey);
+}
+
+/**
+ * Sorts an object by key recursively.
+ * @param message - The object to sort.
+ * @returns The sorted object.
+ */
+function sortObjectByKey(message: object): object {
+    // sort the object by key recursively
+    const sortedMessage = Object.keys(message).sort().reduce((obj: any, key: string) => {
+        if (message[key] && typeof message[key] === 'object' && !Array.isArray(message[key])) {
+            // recursively sort nested objects
+            obj[key] = sortObjectByKey(message[key]);
+        } else {
+            obj[key] = message[key];
+        }
+        return obj;
+    }, {});
+    return sortedMessage;
 }

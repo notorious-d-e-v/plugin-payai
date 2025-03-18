@@ -27,7 +27,7 @@ import {
 } from '../instructions';
 
 export const PAYAI_MARKETPLACE_PROGRAM_ADDRESS =
-  'DKgspHjnwuPZfYWKHdZwVCTZKtNX4TdpASTGoqxpcmtt' as Address<'DKgspHjnwuPZfYWKHdZwVCTZKtNX4TdpASTGoqxpcmtt'>;
+  'EVD9NPX2LVrnxuHHRNzTB9rz6a9dmh1LNQvTuJNLm3R1' as Address<'EVD9NPX2LVrnxuHHRNzTB9rz6a9dmh1LNQvTuJNLm3R1'>;
 
 export enum PayaiMarketplaceAccount {
   BuyerContractCounter,
@@ -210,7 +210,7 @@ export function identifyPayaiMarketplaceInstruction(
 }
 
 export type ParsedPayaiMarketplaceInstruction<
-  TProgram extends string = 'DKgspHjnwuPZfYWKHdZwVCTZKtNX4TdpASTGoqxpcmtt',
+  TProgram extends string = 'EVD9NPX2LVrnxuHHRNzTB9rz6a9dmh1LNQvTuJNLm3R1',
 > =
   | ({
       instructionType: PayaiMarketplaceInstruction.CollectPlatformFees;

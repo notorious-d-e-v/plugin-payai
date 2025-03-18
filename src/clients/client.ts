@@ -4,7 +4,7 @@ import { createHelia, Helia } from 'helia';
 import { createLibp2p, Libp2p, Libp2pOptions } from 'libp2p';
 import { CID } from 'multiformats/cid';
 import { base58btc } from 'multiformats/bases/base58';
-import { createOrbitDB, OrbitDB, IPFSAccessController } from '@orbitdb/core';
+import { createOrbitDB, OrbitDB } from '@orbitdb/core';
 import { FsBlockstore } from 'blockstore-fs';
 import { LevelDatastore } from 'datastore-level'
 import { libp2pOptions } from '../config/libp2p.ts';
@@ -13,11 +13,12 @@ import bootstrapConfig from '../config/bootstrap.json' assert { type: "json" };
 import fs from 'fs';
 import {
   getCIDFromOrbitDbHash,
-  getCIDObjectFromOrbitDbHash,
-  getAllDbEntriesWithCIDs,
   queryOrbitDbReturningCompleteEntries,
-  prepareServiceAd
+  prepareServiceAd,
+  getAllDbEntriesWithCIDs,
+  getBase58PublicKey
 } from '../utils.ts';
+import { paymentClient } from '../payment.ts';
 
 const {
     createHash,
@@ -47,6 +48,13 @@ class PayAIClient implements Client {
     try {
       elizaLogger.info('Initializing PayAI Client');
       const agentDir = dataDir + '/' + runtime.character.name;
+
+      // get the base58 encoded public key of the user's solana account
+      const userPublicKey = await getBase58PublicKey(runtime);
+      elizaLogger.info('User public key: ', userPublicKey);
+
+      // initialize payment client
+      await paymentClient.initialize(runtime);
 
       // create libp2p instance
       const libp2pDatastore: LevelDatastore = new LevelDatastore(agentDir + '/libp2p');

@@ -1,5 +1,5 @@
 // src/clients/client.ts
-import { elizaLogger } from "@elizaos/core";
+import { elizaLogger as elizaLogger2 } from "@elizaos/core";
 import { createHelia } from "helia";
 import { createLibp2p } from "libp2p";
 import { CID as CID2 } from "multiformats/cid";
@@ -103,7 +103,8 @@ async function getBase58PublicKeyFromCryptoKey(publicKey) {
   return bs58.encode(new Uint8Array(publicKeyBytes));
 }
 function prepareMessageForHashing(message) {
-  const serializedMessage = JSON.stringify(message);
+  const sortedMessage = sortObjectByKey(message);
+  const serializedMessage = JSON.stringify(sortedMessage);
   return serializedMessage.replace(/\s/g, "");
 }
 async function hashAndSign(message, privateKey) {
@@ -175,15 +176,14 @@ async function prepareAgreement(agreementDetails, runtime) {
     const solanaKeypair = await getSolanaKeypair(userDefinedPrivateKey);
     const base58PublicKey = await getBase58PublicKeyFromCryptoKey(solanaKeypair.publicKey);
     const message = {
-      ...agreementDetails,
-      identity: base58PublicKey
+      ...agreementDetails
     };
     const signature = await hashAndSign(message, solanaKeypair.privateKey);
     const formattedAgreement = {
       message,
+      identity: base58PublicKey,
       signature,
       _id: signature
-      // TODO make this more resilient in the future
     };
     return formattedAgreement;
   } catch (error) {
@@ -209,6 +209,900 @@ async function getAllDbEntriesWithCIDs(db) {
   }
   return results;
 }
+async function getBase58PublicKey(runtime) {
+  const userDefinedPrivateKey = runtime.getSetting("SOLANA_PRIVATE_KEY");
+  const solanaKeypair = await getSolanaKeypair(userDefinedPrivateKey);
+  return await getBase58PublicKeyFromCryptoKey(solanaKeypair.publicKey);
+}
+function sortObjectByKey(message) {
+  const sortedMessage = Object.keys(message).sort().reduce((obj, key) => {
+    if (message[key] && typeof message[key] === "object" && !Array.isArray(message[key])) {
+      obj[key] = sortObjectByKey(message[key]);
+    } else {
+      obj[key] = message[key];
+    }
+    return obj;
+  }, {});
+  return sortedMessage;
+}
+
+// src/payment.ts
+import {
+  appendTransactionMessageInstruction,
+  createSolanaRpc,
+  createSolanaRpcSubscriptions,
+  createTransactionMessage,
+  createSignerFromKeyPair,
+  getSignatureFromTransaction,
+  lamports,
+  pipe,
+  sendAndConfirmTransactionFactory,
+  setTransactionMessageFeePayerSigner,
+  setTransactionMessageLifetimeUsingBlockhash,
+  signTransactionMessageWithSigners
+} from "@solana/web3.js";
+import { getAddressEncoder as getAddressEncoder8, getProgramDerivedAddress as getProgramDerivedAddress10, getBytesEncoder as getBytesEncoder15 } from "@solana/web3.js";
+import {
+  elizaLogger
+} from "@elizaos/core";
+
+// src/generated/accounts/buyerContractCounter.ts
+import {
+  assertAccountExists,
+  assertAccountsExist,
+  combineCodec,
+  decodeAccount,
+  fetchEncodedAccount,
+  fetchEncodedAccounts,
+  fixDecoderSize,
+  fixEncoderSize,
+  getBytesDecoder,
+  getBytesEncoder,
+  getStructDecoder,
+  getStructEncoder,
+  getU64Decoder,
+  getU64Encoder,
+  transformEncoder
+} from "@solana/web3.js";
+var BUYER_CONTRACT_COUNTER_DISCRIMINATOR = new Uint8Array([
+  181,
+  162,
+  88,
+  45,
+  74,
+  176,
+  199,
+  99
+]);
+function getBuyerContractCounterDecoder() {
+  return getStructDecoder([
+    ["discriminator", fixDecoderSize(getBytesDecoder(), 8)],
+    ["counter", getU64Decoder()]
+  ]);
+}
+function decodeBuyerContractCounter(encodedAccount) {
+  return decodeAccount(
+    encodedAccount,
+    getBuyerContractCounterDecoder()
+  );
+}
+async function fetchBuyerContractCounter(rpc, address, config) {
+  const maybeAccount = await fetchMaybeBuyerContractCounter(
+    rpc,
+    address,
+    config
+  );
+  assertAccountExists(maybeAccount);
+  return maybeAccount;
+}
+async function fetchMaybeBuyerContractCounter(rpc, address, config) {
+  const maybeAccount = await fetchEncodedAccount(rpc, address, config);
+  return decodeBuyerContractCounter(maybeAccount);
+}
+
+// src/generated/accounts/contract.ts
+import {
+  addDecoderSizePrefix,
+  addEncoderSizePrefix,
+  assertAccountExists as assertAccountExists2,
+  assertAccountsExist as assertAccountsExist2,
+  combineCodec as combineCodec2,
+  decodeAccount as decodeAccount2,
+  fetchEncodedAccount as fetchEncodedAccount2,
+  fetchEncodedAccounts as fetchEncodedAccounts2,
+  fixDecoderSize as fixDecoderSize2,
+  fixEncoderSize as fixEncoderSize2,
+  getAddressDecoder,
+  getAddressEncoder,
+  getBooleanDecoder,
+  getBooleanEncoder,
+  getBytesDecoder as getBytesDecoder2,
+  getBytesEncoder as getBytesEncoder2,
+  getStructDecoder as getStructDecoder2,
+  getStructEncoder as getStructEncoder2,
+  getU32Decoder,
+  getU32Encoder,
+  getU64Decoder as getU64Decoder2,
+  getU64Encoder as getU64Encoder2,
+  getUtf8Decoder,
+  getUtf8Encoder,
+  transformEncoder as transformEncoder2
+} from "@solana/web3.js";
+var CONTRACT_DISCRIMINATOR = new Uint8Array([
+  172,
+  138,
+  115,
+  242,
+  121,
+  67,
+  183,
+  26
+]);
+
+// src/generated/accounts/globalState.ts
+import {
+  assertAccountExists as assertAccountExists3,
+  assertAccountsExist as assertAccountsExist3,
+  combineCodec as combineCodec3,
+  decodeAccount as decodeAccount3,
+  fetchEncodedAccount as fetchEncodedAccount3,
+  fetchEncodedAccounts as fetchEncodedAccounts3,
+  fixDecoderSize as fixDecoderSize3,
+  fixEncoderSize as fixEncoderSize3,
+  getAddressDecoder as getAddressDecoder2,
+  getAddressEncoder as getAddressEncoder2,
+  getBytesDecoder as getBytesDecoder3,
+  getBytesEncoder as getBytesEncoder3,
+  getStructDecoder as getStructDecoder3,
+  getStructEncoder as getStructEncoder3,
+  getU64Decoder as getU64Decoder3,
+  getU64Encoder as getU64Encoder3,
+  transformEncoder as transformEncoder3
+} from "@solana/web3.js";
+var GLOBAL_STATE_DISCRIMINATOR = new Uint8Array([
+  163,
+  46,
+  74,
+  168,
+  216,
+  123,
+  133,
+  98
+]);
+function getGlobalStateDecoder() {
+  return getStructDecoder3([
+    ["discriminator", fixDecoderSize3(getBytesDecoder3(), 8)],
+    ["admin", getAddressDecoder2()],
+    ["buyerFeePct", getU64Decoder3()],
+    ["sellerFeePct", getU64Decoder3()]
+  ]);
+}
+function decodeGlobalState(encodedAccount) {
+  return decodeAccount3(
+    encodedAccount,
+    getGlobalStateDecoder()
+  );
+}
+async function fetchGlobalState(rpc, address, config) {
+  const maybeAccount = await fetchMaybeGlobalState(rpc, address, config);
+  assertAccountExists3(maybeAccount);
+  return maybeAccount;
+}
+async function fetchMaybeGlobalState(rpc, address, config) {
+  const maybeAccount = await fetchEncodedAccount3(rpc, address, config);
+  return decodeGlobalState(maybeAccount);
+}
+
+// src/generated/errors/payaiMarketplace.ts
+import {
+  isProgramError
+} from "@solana/web3.js";
+
+// src/generated/programs/payaiMarketplace.ts
+import {
+  containsBytes,
+  fixEncoderSize as fixEncoderSize4,
+  getBytesEncoder as getBytesEncoder4
+} from "@solana/web3.js";
+var PAYAI_MARKETPLACE_PROGRAM_ADDRESS = "EVD9NPX2LVrnxuHHRNzTB9rz6a9dmh1LNQvTuJNLm3R1";
+
+// src/generated/errors/payaiMarketplace.ts
+var PAYAI_MARKETPLACE_ERROR__UNAUTHORIZED = 6e3;
+var PAYAI_MARKETPLACE_ERROR__ALREADY_RELEASED = 6001;
+var PAYAI_MARKETPLACE_ERROR__INVALID_AMOUNT = 6002;
+var payaiMarketplaceErrorMessages;
+if (process.env.NODE_ENV !== "production") {
+  payaiMarketplaceErrorMessages = {
+    [PAYAI_MARKETPLACE_ERROR__ALREADY_RELEASED]: `Payment has already been released`,
+    [PAYAI_MARKETPLACE_ERROR__INVALID_AMOUNT]: `Invalid escrow amount`,
+    [PAYAI_MARKETPLACE_ERROR__UNAUTHORIZED]: `Unauthorized action`
+  };
+}
+
+// src/generated/instructions/collectPlatformFees.ts
+import {
+  combineCodec as combineCodec4,
+  fixDecoderSize as fixDecoderSize4,
+  fixEncoderSize as fixEncoderSize5,
+  getBytesDecoder as getBytesDecoder4,
+  getBytesEncoder as getBytesEncoder5,
+  getProgramDerivedAddress,
+  getStructDecoder as getStructDecoder4,
+  getStructEncoder as getStructEncoder4,
+  transformEncoder as transformEncoder4
+} from "@solana/web3.js";
+
+// src/generated/shared/index.ts
+import {
+  AccountRole,
+  isProgramDerivedAddress,
+  isTransactionSigner as web3JsIsTransactionSigner,
+  upgradeRoleToSigner
+} from "@solana/web3.js";
+function expectAddress(value) {
+  if (!value) {
+    throw new Error("Expected a Address.");
+  }
+  if (typeof value === "object" && "address" in value) {
+    return value.address;
+  }
+  if (Array.isArray(value)) {
+    return value[0];
+  }
+  return value;
+}
+function getAccountMetaFactory(programAddress, optionalAccountStrategy) {
+  return (account) => {
+    if (!account.value) {
+      if (optionalAccountStrategy === "omitted") return;
+      return Object.freeze({
+        address: programAddress,
+        role: AccountRole.READONLY
+      });
+    }
+    const writableRole = account.isWritable ? AccountRole.WRITABLE : AccountRole.READONLY;
+    return Object.freeze({
+      address: expectAddress(account.value),
+      role: isTransactionSigner(account.value) ? upgradeRoleToSigner(writableRole) : writableRole,
+      ...isTransactionSigner(account.value) ? { signer: account.value } : {}
+    });
+  };
+}
+function isTransactionSigner(value) {
+  return !!value && typeof value === "object" && "address" in value && web3JsIsTransactionSigner(value);
+}
+
+// src/generated/instructions/collectPlatformFees.ts
+var COLLECT_PLATFORM_FEES_DISCRIMINATOR = new Uint8Array([
+  191,
+  153,
+  219,
+  164,
+  5,
+  65,
+  153,
+  48
+]);
+
+// src/generated/instructions/initializeBuyerContractCounter.ts
+import {
+  combineCodec as combineCodec5,
+  fixDecoderSize as fixDecoderSize5,
+  fixEncoderSize as fixEncoderSize6,
+  getAddressEncoder as getAddressEncoder3,
+  getBytesDecoder as getBytesDecoder5,
+  getBytesEncoder as getBytesEncoder6,
+  getProgramDerivedAddress as getProgramDerivedAddress2,
+  getStructDecoder as getStructDecoder5,
+  getStructEncoder as getStructEncoder5,
+  transformEncoder as transformEncoder5
+} from "@solana/web3.js";
+var INITIALIZE_BUYER_CONTRACT_COUNTER_DISCRIMINATOR = new Uint8Array([
+  21,
+  138,
+  242,
+  28,
+  218,
+  19,
+  71,
+  106
+]);
+function getInitializeBuyerContractCounterInstructionDataEncoder() {
+  return transformEncoder5(
+    getStructEncoder5([["discriminator", fixEncoderSize6(getBytesEncoder6(), 8)]]),
+    (value) => ({
+      ...value,
+      discriminator: INITIALIZE_BUYER_CONTRACT_COUNTER_DISCRIMINATOR
+    })
+  );
+}
+function getInitializeBuyerContractCounterInstruction(input, config) {
+  const programAddress = (config == null ? void 0 : config.programAddress) ?? PAYAI_MARKETPLACE_PROGRAM_ADDRESS;
+  const originalAccounts = {
+    signer: { value: input.signer ?? null, isWritable: true },
+    buyerContractCounter: {
+      value: input.buyerContractCounter ?? null,
+      isWritable: true
+    },
+    systemProgram: { value: input.systemProgram ?? null, isWritable: false }
+  };
+  const accounts = originalAccounts;
+  if (!accounts.systemProgram.value) {
+    accounts.systemProgram.value = "11111111111111111111111111111111";
+  }
+  const getAccountMeta = getAccountMetaFactory(programAddress, "programId");
+  const instruction = {
+    accounts: [
+      getAccountMeta(accounts.signer),
+      getAccountMeta(accounts.buyerContractCounter),
+      getAccountMeta(accounts.systemProgram)
+    ],
+    programAddress,
+    data: getInitializeBuyerContractCounterInstructionDataEncoder().encode({})
+  };
+  return instruction;
+}
+
+// src/generated/instructions/initializeGlobalState.ts
+import {
+  combineCodec as combineCodec6,
+  fixDecoderSize as fixDecoderSize6,
+  fixEncoderSize as fixEncoderSize7,
+  getBytesDecoder as getBytesDecoder6,
+  getBytesEncoder as getBytesEncoder7,
+  getProgramDerivedAddress as getProgramDerivedAddress3,
+  getStructDecoder as getStructDecoder6,
+  getStructEncoder as getStructEncoder6,
+  transformEncoder as transformEncoder6
+} from "@solana/web3.js";
+var INITIALIZE_GLOBAL_STATE_DISCRIMINATOR = new Uint8Array([
+  232,
+  254,
+  209,
+  244,
+  123,
+  89,
+  154,
+  207
+]);
+
+// src/generated/instructions/readContract.ts
+import {
+  combineCodec as combineCodec7,
+  fixDecoderSize as fixDecoderSize7,
+  fixEncoderSize as fixEncoderSize8,
+  getBytesDecoder as getBytesDecoder7,
+  getBytesEncoder as getBytesEncoder8,
+  getStructDecoder as getStructDecoder7,
+  getStructEncoder as getStructEncoder7,
+  transformEncoder as transformEncoder7
+} from "@solana/web3.js";
+var READ_CONTRACT_DISCRIMINATOR = new Uint8Array([
+  25,
+  214,
+  238,
+  0,
+  237,
+  193,
+  42,
+  3
+]);
+
+// src/generated/instructions/refundBuyer.ts
+import {
+  combineCodec as combineCodec8,
+  fixDecoderSize as fixDecoderSize8,
+  fixEncoderSize as fixEncoderSize9,
+  getAddressEncoder as getAddressEncoder4,
+  getBytesDecoder as getBytesDecoder8,
+  getBytesEncoder as getBytesEncoder9,
+  getProgramDerivedAddress as getProgramDerivedAddress4,
+  getStructDecoder as getStructDecoder8,
+  getStructEncoder as getStructEncoder8,
+  transformEncoder as transformEncoder8
+} from "@solana/web3.js";
+var REFUND_BUYER_DISCRIMINATOR = new Uint8Array([
+  199,
+  139,
+  203,
+  146,
+  192,
+  150,
+  53,
+  218
+]);
+
+// src/generated/instructions/releasePayment.ts
+import {
+  combineCodec as combineCodec9,
+  fixDecoderSize as fixDecoderSize9,
+  fixEncoderSize as fixEncoderSize10,
+  getAddressEncoder as getAddressEncoder5,
+  getBytesDecoder as getBytesDecoder9,
+  getBytesEncoder as getBytesEncoder10,
+  getProgramDerivedAddress as getProgramDerivedAddress5,
+  getStructDecoder as getStructDecoder9,
+  getStructEncoder as getStructEncoder9,
+  transformEncoder as transformEncoder9
+} from "@solana/web3.js";
+var RELEASE_PAYMENT_DISCRIMINATOR = new Uint8Array([
+  24,
+  34,
+  191,
+  86,
+  145,
+  160,
+  183,
+  233
+]);
+
+// src/generated/instructions/startContract.ts
+import {
+  addDecoderSizePrefix as addDecoderSizePrefix2,
+  addEncoderSizePrefix as addEncoderSizePrefix2,
+  combineCodec as combineCodec10,
+  fixDecoderSize as fixDecoderSize10,
+  fixEncoderSize as fixEncoderSize11,
+  getAddressDecoder as getAddressDecoder3,
+  getAddressEncoder as getAddressEncoder6,
+  getBytesDecoder as getBytesDecoder10,
+  getBytesEncoder as getBytesEncoder11,
+  getProgramDerivedAddress as getProgramDerivedAddress6,
+  getStructDecoder as getStructDecoder10,
+  getStructEncoder as getStructEncoder10,
+  getU32Decoder as getU32Decoder2,
+  getU32Encoder as getU32Encoder2,
+  getU64Decoder as getU64Decoder4,
+  getU64Encoder as getU64Encoder4,
+  getUtf8Decoder as getUtf8Decoder2,
+  getUtf8Encoder as getUtf8Encoder2,
+  transformEncoder as transformEncoder10
+} from "@solana/web3.js";
+var START_CONTRACT_DISCRIMINATOR = new Uint8Array([
+  137,
+  123,
+  201,
+  95,
+  241,
+  67,
+  90,
+  245
+]);
+function getStartContractInstructionDataEncoder() {
+  return transformEncoder10(
+    getStructEncoder10([
+      ["discriminator", fixEncoderSize11(getBytesEncoder11(), 8)],
+      ["cid", addEncoderSizePrefix2(getUtf8Encoder2(), getU32Encoder2())],
+      ["payoutAddress", getAddressEncoder6()],
+      ["escrowAmount", getU64Encoder4()]
+    ]),
+    (value) => ({ ...value, discriminator: START_CONTRACT_DISCRIMINATOR })
+  );
+}
+async function getStartContractInstructionAsync(input, config) {
+  const programAddress = (config == null ? void 0 : config.programAddress) ?? PAYAI_MARKETPLACE_PROGRAM_ADDRESS;
+  const originalAccounts = {
+    signer: { value: input.signer ?? null, isWritable: true },
+    buyerContractCounter: {
+      value: input.buyerContractCounter ?? null,
+      isWritable: true
+    },
+    contract: { value: input.contract ?? null, isWritable: true },
+    escrowVault: { value: input.escrowVault ?? null, isWritable: true },
+    globalState: { value: input.globalState ?? null, isWritable: true },
+    systemProgram: { value: input.systemProgram ?? null, isWritable: false }
+  };
+  const accounts = originalAccounts;
+  const args = { ...input };
+  if (!accounts.buyerContractCounter.value) {
+    accounts.buyerContractCounter.value = await getProgramDerivedAddress6({
+      programAddress,
+      seeds: [
+        getBytesEncoder11().encode(
+          new Uint8Array([
+            98,
+            117,
+            121,
+            101,
+            114,
+            95,
+            99,
+            111,
+            110,
+            116,
+            114,
+            97,
+            99,
+            116,
+            95,
+            99,
+            111,
+            117,
+            110,
+            116,
+            101,
+            114
+          ])
+        ),
+        getAddressEncoder6().encode(expectAddress(accounts.signer.value))
+      ]
+    });
+  }
+  if (!accounts.escrowVault.value) {
+    accounts.escrowVault.value = await getProgramDerivedAddress6({
+      programAddress,
+      seeds: [
+        getBytesEncoder11().encode(
+          new Uint8Array([
+            101,
+            115,
+            99,
+            114,
+            111,
+            119,
+            95,
+            118,
+            97,
+            117,
+            108,
+            116
+          ])
+        ),
+        getAddressEncoder6().encode(expectAddress(accounts.contract.value))
+      ]
+    });
+  }
+  if (!accounts.globalState.value) {
+    accounts.globalState.value = await getProgramDerivedAddress6({
+      programAddress,
+      seeds: [
+        getBytesEncoder11().encode(
+          new Uint8Array([
+            103,
+            108,
+            111,
+            98,
+            97,
+            108,
+            95,
+            115,
+            116,
+            97,
+            116,
+            101
+          ])
+        )
+      ]
+    });
+  }
+  if (!accounts.systemProgram.value) {
+    accounts.systemProgram.value = "11111111111111111111111111111111";
+  }
+  const getAccountMeta = getAccountMetaFactory(programAddress, "programId");
+  const instruction = {
+    accounts: [
+      getAccountMeta(accounts.signer),
+      getAccountMeta(accounts.buyerContractCounter),
+      getAccountMeta(accounts.contract),
+      getAccountMeta(accounts.escrowVault),
+      getAccountMeta(accounts.globalState),
+      getAccountMeta(accounts.systemProgram)
+    ],
+    programAddress,
+    data: getStartContractInstructionDataEncoder().encode(
+      args
+    )
+  };
+  return instruction;
+}
+
+// src/generated/instructions/updateAdmin.ts
+import {
+  combineCodec as combineCodec11,
+  fixDecoderSize as fixDecoderSize11,
+  fixEncoderSize as fixEncoderSize12,
+  getAddressDecoder as getAddressDecoder4,
+  getAddressEncoder as getAddressEncoder7,
+  getBytesDecoder as getBytesDecoder11,
+  getBytesEncoder as getBytesEncoder12,
+  getProgramDerivedAddress as getProgramDerivedAddress7,
+  getStructDecoder as getStructDecoder11,
+  getStructEncoder as getStructEncoder11,
+  transformEncoder as transformEncoder11
+} from "@solana/web3.js";
+var UPDATE_ADMIN_DISCRIMINATOR = new Uint8Array([
+  161,
+  176,
+  40,
+  213,
+  60,
+  184,
+  179,
+  228
+]);
+
+// src/generated/instructions/updateBuyerFee.ts
+import {
+  combineCodec as combineCodec12,
+  fixDecoderSize as fixDecoderSize12,
+  fixEncoderSize as fixEncoderSize13,
+  getBytesDecoder as getBytesDecoder12,
+  getBytesEncoder as getBytesEncoder13,
+  getProgramDerivedAddress as getProgramDerivedAddress8,
+  getStructDecoder as getStructDecoder12,
+  getStructEncoder as getStructEncoder12,
+  getU64Decoder as getU64Decoder5,
+  getU64Encoder as getU64Encoder5,
+  transformEncoder as transformEncoder12
+} from "@solana/web3.js";
+var UPDATE_BUYER_FEE_DISCRIMINATOR = new Uint8Array([
+  94,
+  177,
+  87,
+  223,
+  151,
+  1,
+  247,
+  192
+]);
+
+// src/generated/instructions/updateSellerFee.ts
+import {
+  combineCodec as combineCodec13,
+  fixDecoderSize as fixDecoderSize13,
+  fixEncoderSize as fixEncoderSize14,
+  getBytesDecoder as getBytesDecoder13,
+  getBytesEncoder as getBytesEncoder14,
+  getProgramDerivedAddress as getProgramDerivedAddress9,
+  getStructDecoder as getStructDecoder13,
+  getStructEncoder as getStructEncoder13,
+  getU64Decoder as getU64Decoder6,
+  getU64Encoder as getU64Encoder6,
+  transformEncoder as transformEncoder13
+} from "@solana/web3.js";
+var UPDATE_SELLER_FEE_DISCRIMINATOR = new Uint8Array([
+  34,
+  255,
+  173,
+  137,
+  17,
+  241,
+  9,
+  193
+]);
+
+// src/payment.ts
+var Payment = class {
+  runtime;
+  rpcClient;
+  authority;
+  constructor() {
+  }
+  /*
+   * Initialize the payment client.
+   * @param runtime - The runtime.
+   */
+  initialize = async (runtime) => {
+    elizaLogger.info("Initializing PayAI Payment Client");
+    this.rpcClient = this.createDefaultSolanaClient(runtime);
+    this.authority = await this.createSignerFromBase58PrivateKey(runtime.getSetting("SOLANA_PRIVATE_KEY"));
+  };
+  /*
+   * Create a default Solana client.
+   * @param runtime - The runtime.
+   * @returns The Solana client.
+   */
+  createDefaultSolanaClient = (runtime) => {
+    const url = runtime.getSetting("SOLANA_RPC_URL");
+    const wsUrl = runtime.getSetting("SOLANA_WS_URL");
+    const rpc = createSolanaRpc(url);
+    const rpcSubscriptions = createSolanaRpcSubscriptions(wsUrl);
+    return { rpc, rpcSubscriptions };
+  };
+  /*
+   * Create a signer from a base58 private key.
+   * @param privateKey - The private key.
+   * @returns The signer.
+   */
+  createSignerFromBase58PrivateKey = async (privateKey) => {
+    const keypair = await getSolanaKeypair(privateKey);
+    return createSignerFromKeyPair(keypair);
+  };
+  /*
+   * Create a default transaction.
+   * @returns The default transaction.
+   */
+  createDefaultTransaction = async () => {
+    const rpcClient = this.rpcClient;
+    const feePayer = this.authority;
+    const { value: latestBlockhash } = await rpcClient.rpc.getLatestBlockhash().send();
+    return pipe(
+      createTransactionMessage({ version: 0 }),
+      (tx) => setTransactionMessageFeePayerSigner(feePayer, tx),
+      (tx) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, tx)
+    );
+  };
+  /*
+   * Sign and send a transaction.
+   * @param rpcClient - The RPC client.
+   * @param transactionMessage - The transaction message.
+   * @param commitment - The commitment level.
+   * @returns The signature of the transaction.
+   */
+  signAndSendTransaction = async (rpcClient, transactionMessage, commitment = "confirmed") => {
+    const signedTransaction = await signTransactionMessageWithSigners(transactionMessage);
+    const signature = getSignatureFromTransaction(signedTransaction);
+    await sendAndConfirmTransactionFactory(rpcClient)(signedTransaction, {
+      commitment
+    });
+    return signature;
+  };
+  /*
+   * Return the address of the buyer contract counter account.
+   * @param buyer - The address of the buyer.
+   * @returns The address of the buyer contract counter account.
+   */
+  getBuyerContractCounterAccountAddress = async (buyer) => {
+    const addressEncoder = getAddressEncoder8();
+    const bytesEncoder = getBytesEncoder15();
+    const [pda] = await getProgramDerivedAddress10({
+      programAddress: PAYAI_MARKETPLACE_PROGRAM_ADDRESS,
+      seeds: [
+        // "buyer_contract_counter" as bytes
+        bytesEncoder.encode(new Uint8Array([
+          98,
+          117,
+          121,
+          101,
+          114,
+          95,
+          99,
+          111,
+          110,
+          116,
+          114,
+          97,
+          99,
+          116,
+          95,
+          99,
+          111,
+          117,
+          110,
+          116,
+          101,
+          114
+        ])),
+        addressEncoder.encode(buyer)
+      ]
+    });
+    return pda;
+  };
+  /*
+   * Return the address of the contract account.
+   * @param signer - The address of the signer.
+   * @param counter - The counter value from the buyer contract counter.
+   * @returns The address of the contract account.
+   */
+  getContractAccountAddress = async (signer, counter) => {
+    const addressEncoder = getAddressEncoder8();
+    const bytesEncoder = getBytesEncoder15();
+    const counterBuffer = new ArrayBuffer(8);
+    const view = new DataView(counterBuffer);
+    view.setUint32(0, Number(counter & BigInt(4294967295)), true);
+    view.setUint32(4, Number(counter >> BigInt(32)), true);
+    const [pda] = await getProgramDerivedAddress10({
+      programAddress: PAYAI_MARKETPLACE_PROGRAM_ADDRESS,
+      seeds: [
+        // "contract" as bytes
+        bytesEncoder.encode(new Uint8Array([
+          99,
+          111,
+          110,
+          116,
+          114,
+          97,
+          99,
+          116
+        ])),
+        addressEncoder.encode(signer),
+        new Uint8Array(counterBuffer)
+      ]
+    });
+    return pda;
+  };
+  /* Return the BuyerContractCounter account for the given buyer.
+   * @param buyer - The address of the buyer.
+   * @returns The BuyerContractCounter account.
+   */
+  getBuyerContractCounterAccount = async (buyer) => {
+    const buyerContractCounter = await this.getBuyerContractCounterAccountAddress(buyer);
+    try {
+      const counterAccount = await fetchBuyerContractCounter(
+        this.rpcClient.rpc,
+        buyerContractCounter
+      );
+      return counterAccount;
+    } catch (error) {
+      elizaLogger.error("BuyerContractCounter account not found");
+      return null;
+    }
+  };
+  /*
+   * Return the address of the global state account.
+   * @returns The address of the global state account.
+   */
+  getGlobalStateAccountAddress = async () => {
+    const bytesEncoder = getBytesEncoder15();
+    const [pda] = await getProgramDerivedAddress10({
+      programAddress: PAYAI_MARKETPLACE_PROGRAM_ADDRESS,
+      seeds: [
+        // "global_state" as bytes
+        bytesEncoder.encode(new Uint8Array([103, 108, 111, 98, 97, 108, 95, 115, 116, 97, 116, 101]))
+      ]
+    });
+    return pda;
+  };
+  /* 
+   * Return the global state account.
+   * @returns The global state account.
+   */
+  getGlobalStateAccount = async () => {
+    const globalStateAddress = await this.getGlobalStateAccountAddress();
+    const globalState = await fetchGlobalState(this.rpcClient.rpc, globalStateAddress);
+    return globalState;
+  };
+  /*
+   * Initialize the BuyerContractCounter account for the agent.
+   * It uses the agent's SOLANA_PRIVATE_KEY to sign the transaction.
+   */
+  initializeBuyerContractCounter = async () => {
+    const initializeTx = getInitializeBuyerContractCounterInstruction({
+      signer: this.authority,
+      buyerContractCounter: await this.getBuyerContractCounterAccountAddress(this.authority.address)
+    });
+    await pipe(
+      await this.createDefaultTransaction(),
+      (tx) => appendTransactionMessageInstruction(initializeTx, tx),
+      (tx) => this.signAndSendTransaction(this.rpcClient, tx)
+    );
+    elizaLogger.info("BuyerContractCounter account initialized.");
+    const account = await this.getBuyerContractCounterAccount(this.authority.address);
+    elizaLogger.debug("BuyerContractCounter account:", account);
+    return account;
+  };
+  startContract = async (cid, seller, escrowAmount) => {
+    var _a;
+    elizaLogger.debug("Executing contract by funding escrow...");
+    const buyer = this.authority.address;
+    let buyerContractCounter = await this.getBuyerContractCounterAccount(buyer);
+    if (!buyerContractCounter) {
+      elizaLogger.debug("BuyerContractCounter account not found, initializing...");
+      buyerContractCounter = await this.initializeBuyerContractCounter();
+      elizaLogger.debug("BuyerContractCounter account initialized.");
+    }
+    const contractAccountAddress = await this.getContractAccountAddress(buyer, (_a = buyerContractCounter.data) == null ? void 0 : _a.counter);
+    const globalStateAddress = await this.getGlobalStateAccountAddress();
+    const globalState = await this.getGlobalStateAccount();
+    const startContractTx = await getStartContractInstructionAsync({
+      signer: this.authority,
+      buyerContractCounter,
+      contract: contractAccountAddress,
+      globalState: globalStateAddress,
+      cid,
+      payoutAddress: seller,
+      escrowAmount: lamports(BigInt(escrowAmount))
+    });
+    const signature = await pipe(
+      await this.createDefaultTransaction(),
+      (tx) => appendTransactionMessageInstruction(startContractTx, tx),
+      (tx) => this.signAndSendTransaction(this.rpcClient, tx)
+    );
+    elizaLogger.info("Contract started.");
+    return signature;
+  };
+};
+var paymentClient = new Payment();
 
 // src/clients/client.ts
 var {
@@ -227,15 +1121,18 @@ var PayAIClient = class {
   servicesConfigInterval = null;
   sellerServiceAdCID = null;
   constructor() {
-    elizaLogger.debug("PayAI Client created");
+    elizaLogger2.debug("PayAI Client created");
   }
   /**
    * Initializes the PayAI Client by creating libp2p, Helia, and OrbitDB instances.
    */
   async initialize(runtime) {
     try {
-      elizaLogger.info("Initializing PayAI Client");
+      elizaLogger2.info("Initializing PayAI Client");
       const agentDir = dataDir + "/" + runtime.character.name;
+      const userPublicKey = await getBase58PublicKey(runtime);
+      elizaLogger2.info("User public key: ", userPublicKey);
+      await paymentClient.initialize(runtime);
       const libp2pDatastore = new LevelDatastore(agentDir + "/libp2p");
       const libp2pConfig = Object.assign({}, libp2pOptions);
       libp2pConfig.datastore = libp2pDatastore;
@@ -245,26 +1142,26 @@ var PayAIClient = class {
       this.orbitdb = await createOrbitDB({ ipfs: this.ipfs, directory: agentDir });
       this.updatesDB = await this.orbitdb.open(bootstrap_default.databases.updates, { sync: true });
       this.updatesDB.events.on("update", async (entry) => {
-        elizaLogger.debug("payai updates db: ", entry.payload.value);
+        elizaLogger2.debug("payai updates db: ", entry.payload.value);
       });
       await this.updatesDB.add(`Agent ${runtime.character.name} joined the payai network`);
       this.serviceAdsDB = await this.orbitdb.open(bootstrap_default.databases.serviceAds, { sync: true });
       this.serviceAdsDB.events.on("update", async (entry) => {
-        elizaLogger.debug("payai service ads db: ", entry.payload.value);
+        elizaLogger2.debug("payai service ads db: ", entry.payload.value);
       });
       this.buyOffersDB = await this.orbitdb.open(bootstrap_default.databases.buyOffers, { sync: true });
       this.buyOffersDB.events.on("update", async (entry) => {
-        elizaLogger.debug("payai buy offers db: ", entry.payload.value);
+        elizaLogger2.debug("payai buy offers db: ", entry.payload.value);
       });
       this.agreementsDB = await this.orbitdb.open(bootstrap_default.databases.agreements, { sync: true });
       this.agreementsDB.events.on("update", async (entry) => {
-        elizaLogger.debug("payai agreements db: ", entry.payload.value);
+        elizaLogger2.debug("payai agreements db: ", entry.payload.value);
       });
       this.servicesConfigPath = `${agentDir}/sellerServices.json`;
       await this.initSellerAgentFunctionality(runtime);
-      elizaLogger.info("PayAI Client initialized");
+      elizaLogger2.info("PayAI Client initialized");
     } catch (error) {
-      elizaLogger.error("Failed to initialize PayAI Client", error);
+      elizaLogger2.error("Failed to initialize PayAI Client", error);
       throw error;
     }
   }
@@ -286,11 +1183,11 @@ var PayAIClient = class {
         }
       );
       if (fetchedServiceAds.length === 0) {
-        elizaLogger.info("Local services does not match serviceAdsDB, adding to database");
+        elizaLogger2.info("Local services does not match serviceAdsDB, adding to database");
         await this.publishPreparedServiceAd(localServiceAd);
       } else {
         this.sellerServiceAdCID = getCIDFromOrbitDbHash(fetchedServiceAds[0].hash);
-        elizaLogger.info("Local services marches serviceAdsDB, no need to update the database");
+        elizaLogger2.info("Local services marches serviceAdsDB, no need to update the database");
       }
     }
     await this.checkServicesConfig(runtime);
@@ -300,7 +1197,7 @@ var PayAIClient = class {
       const fileContents = fs.readFileSync(this.servicesConfigPath, "utf-8");
       return JSON.parse(fileContents);
     } catch (error) {
-      elizaLogger.error("Error reading sellerServices.json", error);
+      elizaLogger2.error("Error reading sellerServices.json", error);
       console.error(error);
       throw error;
     }
@@ -315,15 +1212,15 @@ var PayAIClient = class {
       }
       const parsedContents = this.readAndParseServicesConfig();
       if (JSON.stringify(this.servicesConfig) !== JSON.stringify(parsedContents)) {
-        elizaLogger.info("sellerServices.json has changed");
+        elizaLogger2.info("sellerServices.json has changed");
         this.servicesConfig = parsedContents;
         const serviceAd = await prepareServiceAd(this.servicesConfig, runtime);
         const result = await this.serviceAdsDB.put(serviceAd);
         this.sellerServiceAdCID = getCIDFromOrbitDbHash(result);
-        elizaLogger.info("Updated serviceAdsDB with new sellerServices.json contents");
+        elizaLogger2.info("Updated serviceAdsDB with new sellerServices.json contents");
       }
     } catch (error) {
-      elizaLogger.error("Error checking sellerServices.json", error);
+      elizaLogger2.error("Error checking sellerServices.json", error);
       console.error(error);
       throw error;
     }
@@ -354,10 +1251,10 @@ var PayAIClient = class {
       const hash = await this.serviceAdsDB.put(serviceAd);
       const cid = getCIDFromOrbitDbHash(hash);
       this.sellerServiceAdCID = cid;
-      elizaLogger.info("Published service ad to IPFS:", this.sellerServiceAdCID);
+      elizaLogger2.info("Published service ad to IPFS:", this.sellerServiceAdCID);
       return this.sellerServiceAdCID;
     } catch (error) {
-      elizaLogger.error("Error publishing prepared service ad", error);
+      elizaLogger2.error("Error publishing prepared service ad", error);
       throw error;
     }
   }
@@ -369,7 +1266,7 @@ var PayAIClient = class {
       const entry = await db.log.get(hash);
       return entry;
     } catch (error) {
-      elizaLogger.error("Error getting orbitdb entry from hash", error);
+      elizaLogger2.error("Error getting orbitdb entry from hash", error);
       throw error;
     }
   }
@@ -392,7 +1289,7 @@ var PayAIClient = class {
         this.servicesConfigInterval = null;
       }
     } catch (error) {
-      elizaLogger.error("Failed to close databases", error);
+      elizaLogger2.error("Failed to close databases", error);
       throw error;
     }
   }
@@ -403,9 +1300,9 @@ var PayAIClient = class {
   async start(runtime) {
     try {
       await this.initialize(runtime);
-      elizaLogger.info("PayAI Client started");
+      elizaLogger2.info("PayAI Client started");
     } catch (error) {
-      elizaLogger.error("Error while starting PayAI Client", error);
+      elizaLogger2.error("Error while starting PayAI Client", error);
       console.error(error);
       throw error;
     }
@@ -419,9 +1316,9 @@ var PayAIClient = class {
       await this.closeDatabases();
       await this.orbitdb.stop();
       await this.ipfs.stop();
-      elizaLogger.info("PayAI Client stopped");
+      elizaLogger2.info("PayAI Client stopped");
     } catch (error) {
-      elizaLogger.error("Error while stopping PayAI Client", error);
+      elizaLogger2.error("Error while stopping PayAI Client", error);
       throw error;
     }
   }
@@ -432,7 +1329,7 @@ var payAIClient = new PayAIClient();
 import {
   ModelClass,
   composeContext,
-  elizaLogger as elizaLogger2,
+  elizaLogger as elizaLogger3,
   generateText,
   getEmbeddingZeroVector,
   cleanJsonResponse
@@ -519,10 +1416,10 @@ var browseAgents = {
         context: findMatchingServicesContext,
         modelClass: ModelClass.LARGE
       });
-      elizaLogger2.debug("found these matching services from the conversation:", findMatchingServicesContent);
+      elizaLogger3.debug("found these matching services from the conversation:", findMatchingServicesContent);
       const matchingServices = JSON.parse(cleanJsonResponse(findMatchingServicesContent));
       if (matchingServices.success === false || matchingServices.success === "false") {
-        elizaLogger2.info("Couldn't find any services matching the user's request.");
+        elizaLogger3.info("Couldn't find any services matching the user's request.");
         if (callback) {
           callback({
             text: matchingServices.result,
@@ -590,7 +1487,7 @@ var browseAgents_default = browseAgents;
 import {
   ModelClass as ModelClass2,
   composeContext as composeContext2,
-  elizaLogger as elizaLogger3,
+  elizaLogger as elizaLogger4,
   generateText as generateText2,
   cleanJsonResponse as cleanJsonResponse2,
   getEmbeddingZeroVector as getEmbeddingZeroVector2
@@ -669,11 +1566,11 @@ var makeOfferAction = {
         context: makeOfferContext,
         modelClass: ModelClass2.SMALL
       });
-      elizaLogger3.debug("extractedDetailsText:", extractedDetailsText);
+      elizaLogger4.debug("extractedDetailsText:", extractedDetailsText);
       const extractedDetails = JSON.parse(cleanJsonResponse2(extractedDetailsText));
-      elizaLogger3.debug("extractedDetails:", extractedDetails);
+      elizaLogger4.debug("extractedDetails:", extractedDetails);
       if (extractedDetails.success === false || extractedDetails.success === "false") {
-        elizaLogger3.info("Need more information from the user to make an offer.");
+        elizaLogger4.info("Need more information from the user to make an offer.");
         if (callback) {
           callback({
             text: extractedDetails.result,
@@ -689,10 +1586,10 @@ var makeOfferAction = {
         desiredUnitAmount: extractedDetails.result.desiredUnitAmount
       };
       const buyOffer = await prepareBuyOffer(offerDetails, runtime);
-      elizaLogger3.debug("Publishing buy offer to IPFS:", buyOffer);
+      elizaLogger4.debug("Publishing buy offer to IPFS:", buyOffer);
       const result = await payAIClient.buyOffersDB.put(buyOffer);
       const CID3 = getCIDFromOrbitDbHash(result);
-      elizaLogger3.info("Published Buy Offer to IPFS: ", CID3);
+      elizaLogger4.info("Published Buy Offer to IPFS: ", CID3);
       let responseToUser = `Successfully made an offer for ${offerDetails.desiredUnitAmount} units of service ID ${offerDetails.desiredServiceID} from seller ${extractedDetails.result.wallet}.`;
       responseToUser += `
 Your Buy Offer's IPFS CID is ${CID3}`;
@@ -714,7 +1611,7 @@ Your Buy Offer's IPFS CID is ${CID3}`;
       }
       return true;
     } catch (error) {
-      elizaLogger3.error("Error in MAKE_OFFER handler:", error);
+      elizaLogger4.error("Error in MAKE_OFFER handler:", error);
       console.error(error);
       if (callback) {
         callback({
@@ -810,7 +1707,7 @@ var makeOfferAction_default = makeOfferAction;
 import {
   ModelClass as ModelClass3,
   composeContext as composeContext3,
-  elizaLogger as elizaLogger4,
+  elizaLogger as elizaLogger5,
   generateText as generateText3,
   cleanJsonResponse as cleanJsonResponse3,
   getEmbeddingZeroVector as getEmbeddingZeroVector3
@@ -862,10 +1759,10 @@ var acceptOfferAction = {
         context: acceptOfferContext,
         modelClass: ModelClass3.SMALL
       });
-      elizaLogger4.debug("extracted the following Buy Offer CID from the conversation:", extractedDetailsText);
+      elizaLogger5.debug("extracted the following Buy Offer CID from the conversation:", extractedDetailsText);
       const extractedDetails = JSON.parse(cleanJsonResponse3(extractedDetailsText));
       if (extractedDetails.success === false || extractedDetails.success === "false") {
-        elizaLogger4.info("Need more information from the user to accept the offer.");
+        elizaLogger5.info("Need more information from the user to accept the offer.");
         if (callback) {
           callback({
             text: extractedDetails.result,
@@ -877,7 +1774,7 @@ var acceptOfferAction = {
       }
       const { isValid, reason } = await isValidBuyOffer(extractedDetails.result.buyOfferCID, runtime);
       if (!isValid) {
-        elizaLogger4.info(reason);
+        elizaLogger5.info(reason);
         if (callback) {
           callback({
             text: reason,
@@ -892,10 +1789,10 @@ var acceptOfferAction = {
         accept: true
       };
       const agreement = await prepareAgreement(agreementDetails, runtime);
-      elizaLogger4.debug("Publishing agreement to IPFS:", agreement);
+      elizaLogger5.debug("Publishing agreement to IPFS:", agreement);
       const result = await payAIClient.agreementsDB.put(agreement);
       const CID3 = getCIDFromOrbitDbHash(result);
-      elizaLogger4.info("Published Agreement to IPFS: ", CID3);
+      elizaLogger5.info("Published Agreement to IPFS: ", CID3);
       let responseToUser = `I accepted the offer and signed an agreement. The Agreement's IPFS CID is ${CID3}`;
       if (callback) {
         const newMemory = {
@@ -915,7 +1812,7 @@ var acceptOfferAction = {
       }
       return true;
     } catch (error) {
-      elizaLogger4.error("Error in ACCEPT_OFFER handler:", error);
+      elizaLogger5.error("Error in ACCEPT_OFFER handler:", error);
       console.error(error);
       if (callback) {
         callback({
@@ -1026,7 +1923,7 @@ var acceptOfferAction_default = acceptOfferAction;
 import {
   ModelClass as ModelClass4,
   composeContext as composeContext4,
-  elizaLogger as elizaLogger5,
+  elizaLogger as elizaLogger6,
   generateText as generateText4,
   getEmbeddingZeroVector as getEmbeddingZeroVector4,
   cleanJsonResponse as cleanJsonResponse4
@@ -1070,7 +1967,7 @@ var advertiseServicesAction = {
   suppressInitialMessage: true,
   validate: async (runtime, message) => {
     if (message.content.source !== "direct") {
-      elizaLogger5.debug("SELL_SERVICES action is only allowed when interacting with the direct client. This message was from:", message.content.source);
+      elizaLogger6.debug("SELL_SERVICES action is only allowed when interacting with the direct client. This message was from:", message.content.source);
       return false;
     }
     return true;
@@ -1091,11 +1988,11 @@ var advertiseServicesAction = {
         context: extractServicesContext,
         modelClass: ModelClass4.SMALL
       });
-      elizaLogger5.debug("extracted services from generateText:", extractedServicesText);
+      elizaLogger6.debug("extracted services from generateText:", extractedServicesText);
       const extractedServices = JSON.parse(cleanJsonResponse4(extractedServicesText));
-      elizaLogger5.debug("extracted the following services from the conversation:", extractedServicesText);
+      elizaLogger6.debug("extracted the following services from the conversation:", extractedServicesText);
       if (extractedServices.success === false || extractedServices.success === "false") {
-        elizaLogger5.info("Need more information from the user to advertise services.");
+        elizaLogger6.info("Need more information from the user to advertise services.");
         if (callback) {
           callback({
             text: extractedServices.result,
@@ -1109,9 +2006,9 @@ var advertiseServicesAction = {
       const CID3 = await payAIClient.publishPreparedServiceAd(serviceAd);
       let responseToUser = `Successfully advertised your services. Your Service Ad's IPFS CID is ${CID3}`;
       const servicesFilePath = payAIClient.servicesConfigPath;
-      elizaLogger5.debug("Updating the local services file with the seller's services");
+      elizaLogger6.debug("Updating the local services file with the seller's services");
       payAIClient.saveSellerServices(JSON.stringify(extractedServices.result, null, 2));
-      elizaLogger5.info("Updated services file locally at:", servicesFilePath);
+      elizaLogger6.info("Updated services file locally at:", servicesFilePath);
       if (callback) {
         const newMemory = {
           userId: message.agentId,
@@ -1130,7 +2027,7 @@ var advertiseServicesAction = {
       }
       return true;
     } catch (error) {
-      elizaLogger5.error("Error in SELL_SERVICES handler:", error);
+      elizaLogger6.error("Error in SELL_SERVICES handler:", error);
       console.error(error);
       if (callback) {
         callback({
@@ -1190,11 +2087,224 @@ var advertiseServicesAction = {
 };
 var advertiseServicesAction_default = advertiseServicesAction;
 
+// src/actions/executeContractAction.ts
+import {
+  ModelClass as ModelClass5,
+  composeContext as composeContext5,
+  elizaLogger as elizaLogger7,
+  generateText as generateText5,
+  cleanJsonResponse as cleanJsonResponse5,
+  getEmbeddingZeroVector as getEmbeddingZeroVector5
+} from "@elizaos/core";
+var extractAgreementCIDTemplate = `
+Analyze the following conversation to extract the CID of the Agreement from the seller.
+
+{{recentMessages}}
+
+Return a JSON object containing only the fields where information was clearly found.
+For example:
+{
+    "success": true,
+    "result": {
+        "agreementCID": "CID of the Agreement"
+    }
+}
+
+If the seller did not provide the CID of the Agreement, then set the "success" field to false and set the result to a string asking the user to provide the missing information.
+For example, if you could not find the CID of the Agreement, then return:
+{
+    "success": false,
+    "result": "Please provide the CID of the Agreement."
+}
+
+Only return a JSON markdown block.
+`;
+var executeContractAction = {
+  name: "EXECUTE_CONTRACT",
+  similes: ["START_ENGAGEMENT", "BEGIN_CONTRACT", "INITIATE_CONTRACT"],
+  description: "This action allows a buyer to start the contract by sending funds to an escrow account on Solana.",
+  suppressInitialMessage: true,
+  validate: async (runtime, message) => {
+    return true;
+  },
+  handler: async (runtime, message, state, _options, callback) => {
+    try {
+      if (!state) {
+        state = await runtime.composeState(message);
+      } else {
+        state = await runtime.updateRecentMessageState(state);
+      }
+      const executeContractContext = composeContext5({
+        state,
+        template: extractAgreementCIDTemplate
+      });
+      const extractedDetailsText = await generateText5({
+        runtime,
+        context: executeContractContext,
+        modelClass: ModelClass5.SMALL
+      });
+      elizaLogger7.debug("extracted the following Agreement CID from the conversation:", extractedDetailsText);
+      const extractedDetails = JSON.parse(cleanJsonResponse5(extractedDetailsText));
+      if (extractedDetails.success === false || extractedDetails.success === "false") {
+        elizaLogger7.info("Need more information from the user to execute the contract.");
+        if (callback) {
+          callback({
+            text: extractedDetails.result,
+            action: "EXECUTE_CONTRACT",
+            source: message.content.source
+          });
+        }
+        return false;
+      }
+      const agreement = (await payAIClient.getEntryFromCID(extractedDetails.result.agreementCID, payAIClient.agreementsDB)).payload.value;
+      ;
+      const isValidAgreement = await verifyMessage(agreement.identity, agreement.signature, agreement.message);
+      if (!isValidAgreement) {
+        elizaLogger7.info("Agreement signature is invalid.");
+        if (callback) {
+          callback({
+            text: "Agreement signature is invalid.",
+            action: "EXECUTE_CONTRACT",
+            source: message.content.source
+          });
+        }
+        return false;
+      }
+      const buyOffer = (await payAIClient.getEntryFromCID(agreement.message.buyOfferCID, payAIClient.buyOffersDB)).payload.value;
+      ;
+      const isValidBuyOffer2 = await verifyMessage(buyOffer.identity, buyOffer.signature, buyOffer.message);
+      if (!isValidBuyOffer2) {
+        elizaLogger7.info("Buy Offer signature is invalid.");
+        if (callback) {
+          callback({
+            text: "Buy Offer signature is invalid.",
+            action: "EXECUTE_CONTRACT",
+            source: message.content.source
+          });
+        }
+        return false;
+      }
+      const base58PublicKey = await getBase58PublicKey(runtime);
+      if (buyOffer.identity !== base58PublicKey) {
+        elizaLogger7.info("The Buy Offer that this Agreement references was not signed by my keypair.");
+        if (callback) {
+          callback({
+            text: "Buy Offer was not signed by my keypair.",
+            action: "EXECUTE_CONTRACT",
+            source: message.content.source
+          });
+        }
+        return false;
+      }
+      const serviceAd = (await payAIClient.getEntryFromCID(buyOffer.message.serviceAdCID, payAIClient.serviceAdsDB)).payload.value;
+      const priceString = serviceAd.message.services[parseInt(buyOffer.message.desiredServiceID)].price;
+      const priceMatch = priceString.match(/(\d+\.?\d*)/);
+      if (!priceMatch) {
+        throw new Error(`Could not extract price from string: ${priceString}`);
+      }
+      const priceInSOL = parseFloat(priceString);
+      const units = parseInt(buyOffer.message.desiredUnitAmount);
+      const totalSOL = priceInSOL * units;
+      const lamportsPerSOL = 1e9;
+      const totalLamports = Math.round(totalSOL * lamportsPerSOL).toString();
+      const tx = await paymentClient.startContract(extractedDetails.result.agreementCID, agreement.identity, totalLamports);
+      let responseToUser = `Successfully started the contract. You can see the transaction at https://solscan.io/tx/${tx}`;
+      if (callback) {
+        const newMemory = {
+          userId: message.agentId,
+          agentId: message.agentId,
+          roomId: message.roomId,
+          content: {
+            text: responseToUser,
+            action: "EXECUTE_CONTRACT",
+            source: message.content.source,
+            agreement: extractedDetails.result.agreementCID
+          },
+          embedding: getEmbeddingZeroVector5()
+        };
+        await runtime.messageManager.createMemory(newMemory);
+        callback(newMemory.content);
+      }
+      return true;
+    } catch (error) {
+      elizaLogger7.error("Error in EXECUTE_CONTRACT handler:", error);
+      console.error(error);
+      if (callback) {
+        callback({
+          text: "Error processing EXECUTE_CONTRACT request.",
+          action: "EXECUTE_CONTRACT",
+          source: message.content.source
+        });
+      }
+      return false;
+    }
+  },
+  examples: [
+    [
+      {
+        user: "{{user1}}",
+        content: {
+          text: "I have signed an agreement with CID bafybeihdwdcojee6xedzdetojuzjevtenxquvykuefgh4dqkjv67uzcmw7"
+        }
+      },
+      {
+        user: "{{user2}}",
+        content: {
+          text: "Great! I checked it out and everything looks good. I just started the contract. You can see the transaction here: https://solscan.io/tx/4vxNhiUKsUpYkJg42WBVA7wLacZwu2MT5ur8ETfpfrZHQuYFTdbu8PHSmAg1ft283LykP3RyLMEFWktzLCvzAjX3"
+        }
+      }
+    ],
+    [
+      {
+        user: "{{user1}}",
+        content: {
+          text: "I have signed an agreement with CID bafybeihdwdcojee6xedzdetojuzjevtenxquvykuefgh4dqkjv67uzcmw7"
+        }
+      },
+      {
+        user: "{{user2}}",
+        content: {
+          text: "I could not find anything with that CID. Please double check and provide it again."
+        }
+      }
+    ],
+    [
+      {
+        user: "{{user1}}",
+        content: {
+          text: "I have signed an agreement with CID bafybeihdwdcojee6xedzdetojuzjevtenxquvykuefgh4dqkjv67uzcmw7"
+        }
+      },
+      {
+        user: "{{user2}}",
+        content: {
+          text: "Agreement signature is invalid."
+        }
+      }
+    ],
+    [
+      {
+        user: "{{user1}}",
+        content: {
+          text: "I have signed an agreement with CID bafybeihdwdcojee6xedzdetojuzjevtenxquvykuefgh4dqkjv67uzcmw7"
+        }
+      },
+      {
+        user: "{{user2}}",
+        content: {
+          text: "The signature of the Buy Offer that this Agreement references is invalid."
+        }
+      }
+    ]
+  ]
+};
+var executeContractAction_default = executeContractAction;
+
 // src/index.ts
 var payaiPlugin = {
   name: "payai",
   description: "Agents can hire other agents for their services. Agents can make money by selling their services.",
-  actions: [browseAgents_default, makeOfferAction_default, acceptOfferAction_default, advertiseServicesAction_default],
+  actions: [browseAgents_default, makeOfferAction_default, acceptOfferAction_default, advertiseServicesAction_default, executeContractAction_default],
   evaluators: [],
   providers: [],
   services: [],

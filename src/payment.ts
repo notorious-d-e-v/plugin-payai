@@ -12,7 +12,6 @@ import {
     SolanaRpcApi,
     SolanaRpcSubscriptionsApi,
     TransactionSigner,
-    airdropFactory,
     createSolanaRpc,
     createSolanaRpcSubscriptions,
     createTransactionMessage,
@@ -26,48 +25,73 @@ import {
     signTransactionMessageWithSigners,
     KeyPairSigner,
     Account,
-  } from '@solana/web3.js';
-import { getAddressEncoder, getProgramDerivedAddress, Address } from '@solana/addresses';
+} from '@solana/web3.js';
+import { getAddressEncoder, getProgramDerivedAddress, Address, getBytesEncoder } from '@solana/web3.js';
 import {
     elizaLogger,
     IAgentRuntime
 } from '@elizaos/core';
-import { getSolanaKeypair } from './utils.ts';
-import * as programClient from "./generated/index.ts";
+import { getBase58PublicKey, getSolanaKeypair } from './utils.ts';
+import {
+    BuyerContractCounter,
+    GlobalState,
+    PAYAI_MARKETPLACE_PROGRAM_ADDRESS,
+    fetchBuyerContractCounter,
+    getInitializeBuyerContractCounterInstruction,
+    getStartContractInstructionAsync,
+    StartContractAsyncInput,
+} from "./generated/index.ts";
+import { fetchGlobalState } from './generated/accounts/globalState.ts';
 
 type RpcClient = {
     rpc: Rpc<SolanaRpcApi>;
     rpcSubscriptions: RpcSubscriptions<SolanaRpcSubscriptionsApi>;
-  };
+};
 
 class Payment {
-
     private runtime: IAgentRuntime;
-    private programClient: typeof programClient;
     private rpcClient: RpcClient;
     private authority: TransactionSigner;
 
-    constructor() {
-        this.programClient = programClient;
-    }
+    constructor() {}
 
+    /*
+     * Initialize the payment client.
+     * @param runtime - The runtime.
+     */
     initialize = async (runtime: IAgentRuntime): Promise<void> => {
         elizaLogger.info('Initializing PayAI Payment Client');
-        const rpcClient = this.createDefaultSolanaClient(runtime.getSetting('SOLANA_RPC_URL'));
+        this.rpcClient = this.createDefaultSolanaClient(runtime);
         this.authority = await this.createSignerFromBase58PrivateKey(runtime.getSetting('SOLANA_PRIVATE_KEY'));
     }
 
-    createDefaultSolanaClient = (url: string): RpcClient => {
+    /*
+     * Create a default Solana client.
+     * @param runtime - The runtime.
+     * @returns The Solana client.
+     */
+    createDefaultSolanaClient = (runtime: IAgentRuntime): RpcClient => {
+        const url = runtime.getSetting('SOLANA_RPC_URL');
+        const wsUrl = runtime.getSetting("SOLANA_WS_URL");
         const rpc = createSolanaRpc(url);
-        const rpcSubscriptions = createSolanaRpcSubscriptions(url.replace('http', 'ws'));
+        const rpcSubscriptions = createSolanaRpcSubscriptions(wsUrl);
         return { rpc, rpcSubscriptions };
     };
 
+    /*
+     * Create a signer from a base58 private key.
+     * @param privateKey - The private key.
+     * @returns The signer.
+     */
     createSignerFromBase58PrivateKey = async (privateKey: string): Promise<KeyPairSigner> => {
         const keypair = await getSolanaKeypair(privateKey);
         return createSignerFromKeyPair(keypair);
     }
 
+    /*
+     * Create a default transaction.
+     * @returns The default transaction.
+     */
     createDefaultTransaction = async () => {
         const rpcClient = this.rpcClient;
         const feePayer = this.authority;
@@ -82,6 +106,13 @@ class Payment {
         );
     };
 
+    /*
+     * Sign and send a transaction.
+     * @param rpcClient - The RPC client.
+     * @param transactionMessage - The transaction message.
+     * @param commitment - The commitment level.
+     * @returns The signature of the transaction.
+     */
     signAndSendTransaction = async (
         rpcClient: RpcClient,
         transactionMessage: CompilableTransactionMessage &
@@ -106,16 +137,51 @@ class Payment {
      * @returns The address of the buyer contract counter account.
      */
     getBuyerContractCounterAccountAddress = async (buyer: string): Promise<Address> => {
-        const programId = this.programClient.PAYAI_MARKETPLACE_PROGRAM_ADDRESS;
         const addressEncoder = getAddressEncoder();
+        const bytesEncoder = getBytesEncoder();
 
         const [pda] = await getProgramDerivedAddress({
-            programAddress: programId as Address,
+            programAddress: PAYAI_MARKETPLACE_PROGRAM_ADDRESS as Address,
             seeds: [
-                // Token program
-                "buyer_contract_counter",
-                // Buyer
+                // "buyer_contract_counter" as bytes
+                bytesEncoder.encode(new Uint8Array([
+                    98, 117, 121, 101, 114, 95, 99, 111, 110, 116, 114, 97, 99, 116, 95,
+                    99, 111, 117, 110, 116, 101, 114
+                ])),
                 addressEncoder.encode(buyer as Address),
+            ],
+        });
+
+        return pda as Address;
+    }
+
+    /*
+     * Return the address of the contract account.
+     * @param signer - The address of the signer.
+     * @param counter - The counter value from the buyer contract counter.
+     * @returns The address of the contract account.
+     */
+    getContractAccountAddress = async (signer: string, counter: bigint): Promise<Address> => {
+        const addressEncoder = getAddressEncoder();
+        const bytesEncoder = getBytesEncoder();
+
+        // Create a 8-byte buffer for the u64 counter
+        const counterBuffer = new ArrayBuffer(8);
+        const view = new DataView(counterBuffer);
+        // Write the lower 32 bits
+        view.setUint32(0, Number(counter & BigInt(0xFFFFFFFF)), true);
+        // Write the upper 32 bits
+        view.setUint32(4, Number(counter >> BigInt(32)), true);
+
+        const [pda] = await getProgramDerivedAddress({
+            programAddress: PAYAI_MARKETPLACE_PROGRAM_ADDRESS as Address,
+            seeds: [
+                // "contract" as bytes
+                bytesEncoder.encode(new Uint8Array([
+                    99, 111, 110, 116, 114, 97, 99, 116
+                ])),
+                addressEncoder.encode(signer as Address),
+                new Uint8Array(counterBuffer)
             ],
         });
 
@@ -126,26 +192,58 @@ class Payment {
      * @param buyer - The address of the buyer.
      * @returns The BuyerContractCounter account.
      */
-    getBuyerContractCounterAccount = async (buyer: string): Promise<Account<programClient.BuyerContractCounter, Address>> => {
+    getBuyerContractCounterAccount = async (buyer: string): Promise<Account<BuyerContractCounter, Address>> => {
         const buyerContractCounter = await this.getBuyerContractCounterAccountAddress(buyer);
-        const counterAccount = await this.programClient.fetchBuyerContractCounter(
-            this.rpcClient.rpc,
-            buyerContractCounter
-        );
+        
+        try {
+            const counterAccount = await fetchBuyerContractCounter(
+                this.rpcClient.rpc,
+                buyerContractCounter
+            );
 
-        return counterAccount;
+            return counterAccount;
+        } catch (error) {
+            elizaLogger.error('BuyerContractCounter account not found');
+            return null;
+        }
+    }
+
+    /*
+     * Return the address of the global state account.
+     * @returns The address of the global state account.
+     */
+    getGlobalStateAccountAddress = async (): Promise<Address> => {
+        const bytesEncoder = getBytesEncoder();
+
+        const [pda] = await getProgramDerivedAddress({
+            programAddress: PAYAI_MARKETPLACE_PROGRAM_ADDRESS as Address,
+            seeds: [
+                // "global_state" as bytes
+                bytesEncoder.encode(new Uint8Array([103, 108, 111, 98, 97, 108, 95, 115, 116, 97, 116, 101]))
+            ],
+        });
+
+        return pda as Address;
+    }
+
+    /* 
+     * Return the global state account.
+     * @returns The global state account.
+     */
+    getGlobalStateAccount = async (): Promise<Account<GlobalState, Address>> => {
+        const globalStateAddress = await this.getGlobalStateAccountAddress();
+        const globalState = await fetchGlobalState(this.rpcClient.rpc, globalStateAddress);
+        return globalState;
     }
 
     /*
      * Initialize the BuyerContractCounter account for the agent.
      * It uses the agent's SOLANA_PRIVATE_KEY to sign the transaction.
      */
-    initializeBuyerContractCounter = async (): Promise<Account<programClient.BuyerContractCounter, Address>> => {
-        // const buyerContractCounterAddress = await this.getBuyerContractCounterAccountAddress(this.authority.address);
-        const initializeTx = this.programClient.getInitializeBuyerContractCounterInstruction({
+    initializeBuyerContractCounter = async (): Promise<Account<BuyerContractCounter, Address>> => {
+        const initializeTx = getInitializeBuyerContractCounterInstruction({
             signer: this.authority,
-            buyerContractCounter: undefined,  // programClient will auto fetch it
-            systemProgram: undefined,  // programClient will auto fetch it
+            buyerContractCounter: await this.getBuyerContractCounterAccountAddress(this.authority.address),
         });
 
         await pipe(
@@ -162,36 +260,47 @@ class Payment {
     }
 
     startContract = async (cid: string, seller: string, escrowAmount: string) => {
+        elizaLogger.debug('Executing contract by funding escrow...');
+
         // fetch buyer contract counter
         const buyer = this.authority.address;
         let buyerContractCounter = await this.getBuyerContractCounterAccount(buyer);
 
         // initialize buyerContractCounter account if it doesn't exist
         if (!buyerContractCounter) {
+            elizaLogger.debug('BuyerContractCounter account not found, initializing...');
             buyerContractCounter = await this.initializeBuyerContractCounter();
+            elizaLogger.debug('BuyerContractCounter account initialized.');
         }
 
+        // get the contract account address
+        const contractAccountAddress = await this.getContractAccountAddress(buyer, buyerContractCounter.data?.counter)
+        const globalStateAddress = await this.getGlobalStateAccountAddress();
+        const globalState = await this.getGlobalStateAccount();
+
         // prepare the start contract instruction
-        const startContractTx = this.programClient.getStartContractInstruction({
+        const startContractTx = await getStartContractInstructionAsync({
             signer: this.authority,
-            buyerContractCounter: buyerContractCounter.address,
-            contract: undefined,  // programClient will auto fetch it
-            escrowVault: undefined,  // programClient will auto fetch it
-            globalState: undefined,  // programClient will auto fetch it
-            systemProgram: undefined,  // programClient will auto fetch it
+            buyerContractCounter: buyerContractCounter,
+            contract: contractAccountAddress,
+            globalState: globalStateAddress,
             cid: cid,
             payoutAddress: seller as Address,
             escrowAmount: lamports(BigInt(escrowAmount)),
         });
 
         // prepare and send the transaction
-        await pipe(
+        const signature = await pipe(
             await this.createDefaultTransaction(),
             (tx) => appendTransactionMessageInstruction(startContractTx, tx),
             (tx) => this.signAndSendTransaction(this.rpcClient, tx)
         );
 
         elizaLogger.info('Contract started.');
+        return signature;
     }
-
 }
+
+const paymentClient = new Payment();
+
+export { paymentClient };
