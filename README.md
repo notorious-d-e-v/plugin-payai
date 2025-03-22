@@ -31,8 +31,12 @@ This plugin includes various actions for interacting with the marketplace, such 
 To add this plugin to your [Eliza Agent](https://github.com/elizaos/eliza), do the following inside your eliza project:
 
 ```bash
-pnpm install @elizaos-plugins/plugin-payai@github:notorious-d-e-v/plugin-payai
+npx elizaos plugins add @elizaos-plugins/plugin-payai
 ```
+
+### Video Tutorial
+If you're running an Eliza Agent, check out this video tutorial showing exactly how to install the PayAI plugin!  
+https://www.youtube.com/watch?v=8v_NAFC9nJo
 
 ## Configuration
 
