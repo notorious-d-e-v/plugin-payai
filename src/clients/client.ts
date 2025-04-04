@@ -33,7 +33,7 @@ class PayAIClient implements Client {
   public serviceAdsDB: Database | null = null;
   public buyOffersDB: Database | null = null;
   public agreementsDB: Database | null = null;
-  private servicesConfig: any = null;
+  public fundedContractsDB: Database | null = null;
   private servicesConfigPath: string;
   public sellerServiceAdCID: string | null = null;
 
@@ -92,6 +92,12 @@ class PayAIClient implements Client {
       this.agreementsDB = await this.orbitdb.open(bootstrapConfig.databases.agreements, { sync: true });
       this.agreementsDB.events.on('update', async (entry) => {
         elizaLogger.debug('payai agreements db: ', entry.payload.value);
+      });
+
+      // open funded contracts database
+      this.fundedContractsDB = await this.orbitdb.open(bootstrapConfig.databases.fundedContracts, { sync: true });
+      this.fundedContractsDB.events.on('update', async (entry) => {
+        elizaLogger.debug('payai funded contracts db: ', entry.payload.value);
       });
 
       // init seller agent checks
@@ -209,6 +215,7 @@ class PayAIClient implements Client {
       await this.serviceAdsDB.close();
       await this.buyOffersDB.close();
       await this.agreementsDB.close();
+      await this.fundedContractsDB.close();
     } catch (error) {
       elizaLogger.error('Failed to close databases', error);
       throw error;

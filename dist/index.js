@@ -29,7 +29,8 @@ var bootstrap_default = {
     updates: "/orbitdb/zdpuB29HS4Pd9vjr4qs9NdfEH5TCmVPqoHm9frf9c77Crq7Z5",
     serviceAds: "/orbitdb/zdpuAyvkTHk4w8wMTVCjvDRrFQpeGyYdrgoK48ufj8B5WgZst",
     buyOffers: "/orbitdb/zdpuAyM5AWffHSqTtxf2KubRARvwYFTycfuQX4ZG4MhhdyUML",
-    agreements: "/orbitdb/zdpuAu9t5Avi2BVBEu3wjDTBcMYTyUKnuqPx3saFUKEw6GXhc"
+    agreements: "/orbitdb/zdpuAu9t5Avi2BVBEu3wjDTBcMYTyUKnuqPx3saFUKEw6GXhc",
+    fundedContracts: "/orbitdb/zdpuArSuYKp4g3VHgWAFMEPUqAt82AhWU4huPRSBfBV4sMMgV"
   }
 };
 
@@ -1195,7 +1196,7 @@ var PayAIClient = class {
   serviceAdsDB = null;
   buyOffersDB = null;
   agreementsDB = null;
-  servicesConfig = null;
+  fundedContractsDB = null;
   servicesConfigPath;
   sellerServiceAdCID = null;
   constructor() {
@@ -1233,6 +1234,10 @@ var PayAIClient = class {
       this.agreementsDB = await this.orbitdb.open(bootstrap_default.databases.agreements, { sync: true });
       this.agreementsDB.events.on("update", async (entry) => {
         elizaLogger2.debug("payai agreements db: ", entry.payload.value);
+      });
+      this.fundedContractsDB = await this.orbitdb.open(bootstrap_default.databases.fundedContracts, { sync: true });
+      this.fundedContractsDB.events.on("update", async (entry) => {
+        elizaLogger2.debug("payai funded contracts db: ", entry.payload.value);
       });
       this.servicesConfigPath = `${agentDir}/sellerServices.json`;
       await this.initSellerAgentFunctionality(runtime);
@@ -1327,6 +1332,7 @@ var PayAIClient = class {
       await this.serviceAdsDB.close();
       await this.buyOffersDB.close();
       await this.agreementsDB.close();
+      await this.fundedContractsDB.close();
     } catch (error) {
       elizaLogger2.error("Failed to close databases", error);
       throw error;
@@ -2257,6 +2263,7 @@ var executeContractAction = {
         await runtime.messageManager.createMemory(newMemory);
         callback(newMemory.content);
       }
+      await payAIClient.fundedContractsDB.add(tx.toString());
       return true;
     } catch (error) {
       elizaLogger7.error("Error in EXECUTE_CONTRACT handler:", error);

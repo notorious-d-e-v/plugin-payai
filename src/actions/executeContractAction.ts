@@ -179,8 +179,10 @@ const executeContractAction: Action = {
                 callback(newMemory.content);
             }
 
-            return true;
+            // add the contract to the fundedContractsDB
+            await payAIClient.fundedContractsDB.add(tx.toString());
 
+            return true;
         } catch (error) {
             elizaLogger.error('Error in EXECUTE_CONTRACT handler:', error);
             console.error(error);
