@@ -4,7 +4,7 @@ import { createHelia, Helia } from 'helia';
 import { createLibp2p, Libp2p, Libp2pOptions } from 'libp2p';
 import { CID } from 'multiformats/cid';
 import { base58btc } from 'multiformats/bases/base58';
-import { createOrbitDB, OrbitDB } from '@orbitdb/core';
+import { createOrbitDB, OrbitDB, Database } from '@orbitdb/core';
 import { FsBlockstore } from 'blockstore-fs';
 import { LevelDatastore } from 'datastore-level'
 import { libp2pOptions } from '../config/libp2p.ts';
@@ -16,7 +16,8 @@ import {
   queryOrbitDbReturningCompleteEntries,
   prepareServiceAd,
   getAllDbEntriesWithCIDs,
-  getBase58PublicKey
+  getBase58PublicKey,
+  prepareMessageForHashing
 } from '../utils.ts';
 import { paymentClient } from '../payment.ts';
 
@@ -28,13 +29,12 @@ class PayAIClient implements Client {
   public libp2p: Libp2p | null = null;
   public ipfs: Helia | null = null;
   public orbitdb: OrbitDB | null = null;
-  public updatesDB: any = null;
-  public serviceAdsDB: any = null;
-  public buyOffersDB: any = null;
-  public agreementsDB: any = null;
+  public updatesDB: Database | null = null;
+  public serviceAdsDB: Database | null = null;
+  public buyOffersDB: Database | null = null;
+  public agreementsDB: Database | null = null;
   private servicesConfig: any = null;
   private servicesConfigPath: string;
-  private servicesConfigInterval: NodeJS.Timeout | null = null;
   public sellerServiceAdCID: string | null = null;
 
   constructor() {
@@ -75,9 +75,6 @@ class PayAIClient implements Client {
         // what has been updated.
         elizaLogger.debug('payai updates db: ', entry.payload.value);
       });
-
-      // write to the updates database
-      await this.updatesDB.add(`Agent ${runtime.character.name} joined the payai network`);
 
       // open service ads database
       this.serviceAdsDB = await this.orbitdb.open(bootstrapConfig.databases.serviceAds, { sync: true });
@@ -126,7 +123,7 @@ class PayAIClient implements Client {
             this.serviceAdsDB,
             (doc: any) => {
                 return (
-                    doc.message.toString() === localServiceAd.message.toString() &&
+                    prepareMessageForHashing(doc.message) == prepareMessageForHashing(localServiceAd.message) &&
                     doc.signature === localServiceAd.signature
                 );
             }
@@ -141,59 +138,7 @@ class PayAIClient implements Client {
           elizaLogger.info('Local services marches serviceAdsDB, no need to update the database');
         }
       }
-
-      // start a periodic check for updates to the sellerServices.json file
-      // in case the seller agent changes their local services
-      await this.checkServicesConfig(runtime);
-      /*
-      this.servicesConfigInterval = setInterval(() => {
-        this.checkServicesConfig(runtime).catch(error => {
-          elizaLogger.error('Error in servicesConfigInterval', error);
-        });
-      }, 20000);
-      */
     }
-
-  private readAndParseServicesConfig(): any {
-    try {
-        const fileContents = fs.readFileSync(this.servicesConfigPath, 'utf-8');
-        return JSON.parse(fileContents);
-        }
-    catch (error) {
-        elizaLogger.error('Error reading sellerServices.json', error);
-        console.error(error);
-        throw error;
-    }
-  }
-
-  /**
-   * Checks the sellerServices.json file for updates and updates the serviceAdsDB if necessary.
-   */
-  private async checkServicesConfig(runtime: IAgentRuntime): Promise<void> {
-    try {
-      // return early if the file does not exist
-      if (!fs.existsSync(this.servicesConfigPath)) {
-        return;
-      }
-
-      // read and parse the contents of the sellerServices.json file
-      const parsedContents = this.readAndParseServicesConfig();
-
-      // contents have changed, update the serviceAdsDB
-      if (JSON.stringify(this.servicesConfig) !== JSON.stringify(parsedContents)) {
-        elizaLogger.info("sellerServices.json has changed");
-        this.servicesConfig = parsedContents;
-        const serviceAd = await prepareServiceAd(this.servicesConfig, runtime);
-        const result = await this.serviceAdsDB.put(serviceAd);
-        this.sellerServiceAdCID = getCIDFromOrbitDbHash(result);
-        elizaLogger.info('Updated serviceAdsDB with new sellerServices.json contents');
-      }
-    } catch (error) {
-      elizaLogger.error('Error checking sellerServices.json', error);
-      console.error(error);
-      throw error;
-    }
-  }
 
   /*
    * Sets the servicesConfig.
@@ -253,7 +198,7 @@ class PayAIClient implements Client {
     public async getEntryFromCID(cid: string, db: any): Promise<any> {
       const hash = CID.parse(cid).toString(base58btc);
       return this.getEntryFromHash(hash, db);
-    }
+  }
 
   /*
    * Close the OrbitDB databases.
@@ -264,10 +209,6 @@ class PayAIClient implements Client {
       await this.serviceAdsDB.close();
       await this.buyOffersDB.close();
       await this.agreementsDB.close();
-      if (this.servicesConfigInterval) {
-        clearInterval(this.servicesConfigInterval);
-        this.servicesConfigInterval = null;
-      }
     } catch (error) {
       elizaLogger.error('Failed to close databases', error);
       throw error;

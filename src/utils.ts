@@ -59,7 +59,7 @@ export async function getBase58PublicKeyFromCryptoKey(publicKey: CryptoKey): Pro
     return bs58.encode(new Uint8Array(publicKeyBytes));
 }
 
-function prepareMessageForHashing(message: object): string {
+export function prepareMessageForHashing(message: object): string {
     // sort the object by key recursively
     const sortedMessage = sortObjectByKey(message);
 
@@ -282,16 +282,23 @@ export async function getBase58PublicKey(runtime: IAgentRuntime): Promise<string
 }
 
 /**
- * Sorts an object by key recursively.
+ * Sorts an object by key recursively, including arrays.
  * @param message - The object to sort.
  * @returns The sorted object.
  */
 function sortObjectByKey(message: object): object {
     // sort the object by key recursively
     const sortedMessage = Object.keys(message).sort().reduce((obj: any, key: string) => {
-        if (message[key] && typeof message[key] === 'object' && !Array.isArray(message[key])) {
-            // recursively sort nested objects
-            obj[key] = sortObjectByKey(message[key]);
+        if (message[key] && typeof message[key] === 'object') {
+            if (Array.isArray(message[key])) {
+                // recursively sort array elements if they are objects
+                obj[key] = message[key].map((item: any) => 
+                    typeof item === 'object' && item !== null ? sortObjectByKey(item) : item
+                );
+            } else {
+                // recursively sort nested objects
+                obj[key] = sortObjectByKey(message[key]);
+            }
         } else {
             obj[key] = message[key];
         }

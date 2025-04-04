@@ -25,13 +25,15 @@ import {
     signTransactionMessageWithSigners,
     KeyPairSigner,
     Account,
+    Signature,
+    Transaction,
 } from '@solana/web3.js';
 import { getAddressEncoder, getProgramDerivedAddress, Address, getBytesEncoder } from '@solana/web3.js';
 import {
     elizaLogger,
     IAgentRuntime
 } from '@elizaos/core';
-import { getBase58PublicKey, getSolanaKeypair } from './utils.ts';
+import { getSolanaKeypair } from './utils.ts';
 import {
     BuyerContractCounter,
     GlobalState,
@@ -40,6 +42,7 @@ import {
     getInitializeBuyerContractCounterInstruction,
     getStartContractInstructionAsync,
     StartContractAsyncInput,
+    fetchContract
 } from "./generated/index.ts";
 import { fetchGlobalState } from './generated/accounts/globalState.ts';
 
@@ -86,6 +89,19 @@ class Payment {
     createSignerFromBase58PrivateKey = async (privateKey: string): Promise<KeyPairSigner> => {
         const keypair = await getSolanaKeypair(privateKey);
         return createSignerFromKeyPair(keypair);
+    }
+
+    /*
+     * Fetch a transaction from the RPC.
+     * @param signature - The signature of the transaction.
+     * @returns The transaction.
+     */
+    fetchTransaction = async (signature: string): Promise<any> => {
+        const tx = await this.rpcClient.rpc.getTransaction(signature as Signature, {
+            commitment: 'confirmed',
+            maxSupportedTransactionVersion: 0,
+        }).send();
+        return tx;
     }
 
     /*
@@ -298,6 +314,46 @@ class Payment {
 
         elizaLogger.info('Contract started.');
         return signature;
+    }
+
+    /*
+     * Get the contract account from a transaction signature.
+     * @param transactionSignature - The signature of the transaction that created the contract.
+     * @returns The contract account data.
+     */
+    getContractAccountFromTransaction = async (transactionSignature: string): Promise<Account<Contract, Address> | null> => {
+        try {
+            // get the transaction details
+            const transaction = await this.fetchTransaction(transactionSignature);
+
+            if (!transaction) {
+                elizaLogger.error('Transaction not found');
+                return null;
+            }
+
+            // fetch the contract account
+            let contractAccount;
+            for (const account of transaction.transaction.message.accountKeys) {
+                try {
+                    contractAccount = await fetchContract(
+                        this.rpcClient.rpc,
+                        account
+                    );
+                    
+                    if (contractAccount.data) {
+                        elizaLogger.debug('Contract found in account', account);
+                        break;
+                    }
+                } catch (error) {
+                    elizaLogger.debug('Contract not found in account', account);
+                }
+            }
+
+            return contractAccount;
+        } catch (error) {
+            elizaLogger.error('Error getting contract account from transaction:', error);
+            return null;
+        }
     }
 }
 

@@ -1,7 +1,9 @@
 {
     "addresses": [
         "/ip4/146.0.79.23/tcp/2368/p2p/12D3KooWRZjd3sRLEuGDW2JR8xsnXedosU3eoe5XhnUAsqFauoTn",
-        "/ip4/146.0.79.23/tcp/2369/ws/p2p/12D3KooWRZjd3sRLEuGDW2JR8xsnXedosU3eoe5XhnUAsqFauoTn"
+        "/ip4/146.0.79.23/tcp/2369/ws/p2p/12D3KooWRZjd3sRLEuGDW2JR8xsnXedosU3eoe5XhnUAsqFauoTn",
+        "/ip4/194.164.234.145/tcp/2368/p2p/12D3KooWSqFeLyhU1GFFpodBrbGFCTGEvqW4nFKV4LsZk3L4LoZz",
+        "/ip4/194.164.234.145/tcp/2369/ws/p2p/12D3KooWSqFeLyhU1GFFpodBrbGFCTGEvqW4nFKV4LsZk3L4LoZz"
     ],
     "databases": {
         "updates": "/orbitdb/zdpuB29HS4Pd9vjr4qs9NdfEH5TCmVPqoHm9frf9c77Crq7Z5",

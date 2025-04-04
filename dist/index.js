@@ -21,7 +21,9 @@ import { gossipsub } from "@chainsafe/libp2p-gossipsub";
 var bootstrap_default = {
   addresses: [
     "/ip4/146.0.79.23/tcp/2368/p2p/12D3KooWRZjd3sRLEuGDW2JR8xsnXedosU3eoe5XhnUAsqFauoTn",
-    "/ip4/146.0.79.23/tcp/2369/ws/p2p/12D3KooWRZjd3sRLEuGDW2JR8xsnXedosU3eoe5XhnUAsqFauoTn"
+    "/ip4/146.0.79.23/tcp/2369/ws/p2p/12D3KooWRZjd3sRLEuGDW2JR8xsnXedosU3eoe5XhnUAsqFauoTn",
+    "/ip4/194.164.234.145/tcp/2368/p2p/12D3KooWSqFeLyhU1GFFpodBrbGFCTGEvqW4nFKV4LsZk3L4LoZz",
+    "/ip4/194.164.234.145/tcp/2369/ws/p2p/12D3KooWSqFeLyhU1GFFpodBrbGFCTGEvqW4nFKV4LsZk3L4LoZz"
   ],
   databases: {
     updates: "/orbitdb/zdpuB29HS4Pd9vjr4qs9NdfEH5TCmVPqoHm9frf9c77Crq7Z5",
@@ -216,8 +218,14 @@ async function getBase58PublicKey(runtime) {
 }
 function sortObjectByKey(message) {
   const sortedMessage = Object.keys(message).sort().reduce((obj, key) => {
-    if (message[key] && typeof message[key] === "object" && !Array.isArray(message[key])) {
-      obj[key] = sortObjectByKey(message[key]);
+    if (message[key] && typeof message[key] === "object") {
+      if (Array.isArray(message[key])) {
+        obj[key] = message[key].map(
+          (item) => typeof item === "object" && item !== null ? sortObjectByKey(item) : item
+        );
+      } else {
+        obj[key] = sortObjectByKey(message[key]);
+      }
     } else {
       obj[key] = message[key];
     }
@@ -338,6 +346,32 @@ var CONTRACT_DISCRIMINATOR = new Uint8Array([
   183,
   26
 ]);
+function getContractDecoder() {
+  return getStructDecoder2([
+    ["discriminator", fixDecoderSize2(getBytesDecoder2(), 8)],
+    ["cid", addDecoderSizePrefix(getUtf8Decoder(), getU32Decoder())],
+    ["buyer", getAddressDecoder()],
+    ["seller", getAddressDecoder()],
+    ["amount", getU64Decoder2()],
+    ["buyerCounter", getU64Decoder2()],
+    ["isReleased", getBooleanDecoder()]
+  ]);
+}
+function decodeContract(encodedAccount) {
+  return decodeAccount2(
+    encodedAccount,
+    getContractDecoder()
+  );
+}
+async function fetchContract(rpc, address, config) {
+  const maybeAccount = await fetchMaybeContract(rpc, address, config);
+  assertAccountExists2(maybeAccount);
+  return maybeAccount;
+}
+async function fetchMaybeContract(rpc, address, config) {
+  const maybeAccount = await fetchEncodedAccount2(rpc, address, config);
+  return decodeContract(maybeAccount);
+}
 
 // src/generated/accounts/globalState.ts
 import {
@@ -404,7 +438,7 @@ import {
   fixEncoderSize as fixEncoderSize4,
   getBytesEncoder as getBytesEncoder4
 } from "@solana/web3.js";
-var PAYAI_MARKETPLACE_PROGRAM_ADDRESS = "EVD9NPX2LVrnxuHHRNzTB9rz6a9dmh1LNQvTuJNLm3R1";
+var PAYAI_MARKETPLACE_PROGRAM_ADDRESS = "5FhmaXvWm1FZ3bpsE5rxkey5pNWDLkvaGAzoGkTUZfZ3";
 
 // src/generated/errors/payaiMarketplace.ts
 var PAYAI_MARKETPLACE_ERROR__UNAUTHORIZED = 6e3;
@@ -909,6 +943,18 @@ var Payment = class {
     return createSignerFromKeyPair(keypair);
   };
   /*
+   * Fetch a transaction from the RPC.
+   * @param signature - The signature of the transaction.
+   * @returns The transaction.
+   */
+  fetchTransaction = async (signature) => {
+    const tx = await this.rpcClient.rpc.getTransaction(signature, {
+      commitment: "confirmed",
+      maxSupportedTransactionVersion: 0
+    }).send();
+    return tx;
+  };
+  /*
    * Create a default transaction.
    * @returns The default transaction.
    */
@@ -1101,6 +1147,39 @@ var Payment = class {
     elizaLogger.info("Contract started.");
     return signature;
   };
+  /*
+   * Get the contract account from a transaction signature.
+   * @param transactionSignature - The signature of the transaction that created the contract.
+   * @returns The contract account data.
+   */
+  getContractAccountFromTransaction = async (transactionSignature) => {
+    try {
+      const transaction = await this.fetchTransaction(transactionSignature);
+      if (!transaction) {
+        elizaLogger.error("Transaction not found");
+        return null;
+      }
+      let contractAccount;
+      for (const account of transaction.transaction.message.accountKeys) {
+        try {
+          contractAccount = await fetchContract(
+            this.rpcClient.rpc,
+            account
+          );
+          if (contractAccount.data) {
+            elizaLogger.debug("Contract found in account", account);
+            break;
+          }
+        } catch (error) {
+          elizaLogger.debug("Contract not found in account", account);
+        }
+      }
+      return contractAccount;
+    } catch (error) {
+      elizaLogger.error("Error getting contract account from transaction:", error);
+      return null;
+    }
+  };
 };
 var paymentClient = new Payment();
 
@@ -1118,7 +1197,6 @@ var PayAIClient = class {
   agreementsDB = null;
   servicesConfig = null;
   servicesConfigPath;
-  servicesConfigInterval = null;
   sellerServiceAdCID = null;
   constructor() {
     elizaLogger2.debug("PayAI Client created");
@@ -1144,7 +1222,6 @@ var PayAIClient = class {
       this.updatesDB.events.on("update", async (entry) => {
         elizaLogger2.debug("payai updates db: ", entry.payload.value);
       });
-      await this.updatesDB.add(`Agent ${runtime.character.name} joined the payai network`);
       this.serviceAdsDB = await this.orbitdb.open(bootstrap_default.databases.serviceAds, { sync: true });
       this.serviceAdsDB.events.on("update", async (entry) => {
         elizaLogger2.debug("payai service ads db: ", entry.payload.value);
@@ -1179,7 +1256,7 @@ var PayAIClient = class {
       const fetchedServiceAds = await queryOrbitDbReturningCompleteEntries(
         this.serviceAdsDB,
         (doc) => {
-          return doc.message.toString() === localServiceAd.message.toString() && doc.signature === localServiceAd.signature;
+          return prepareMessageForHashing(doc.message) == prepareMessageForHashing(localServiceAd.message) && doc.signature === localServiceAd.signature;
         }
       );
       if (fetchedServiceAds.length === 0) {
@@ -1189,40 +1266,6 @@ var PayAIClient = class {
         this.sellerServiceAdCID = getCIDFromOrbitDbHash(fetchedServiceAds[0].hash);
         elizaLogger2.info("Local services marches serviceAdsDB, no need to update the database");
       }
-    }
-    await this.checkServicesConfig(runtime);
-  }
-  readAndParseServicesConfig() {
-    try {
-      const fileContents = fs.readFileSync(this.servicesConfigPath, "utf-8");
-      return JSON.parse(fileContents);
-    } catch (error) {
-      elizaLogger2.error("Error reading sellerServices.json", error);
-      console.error(error);
-      throw error;
-    }
-  }
-  /**
-   * Checks the sellerServices.json file for updates and updates the serviceAdsDB if necessary.
-   */
-  async checkServicesConfig(runtime) {
-    try {
-      if (!fs.existsSync(this.servicesConfigPath)) {
-        return;
-      }
-      const parsedContents = this.readAndParseServicesConfig();
-      if (JSON.stringify(this.servicesConfig) !== JSON.stringify(parsedContents)) {
-        elizaLogger2.info("sellerServices.json has changed");
-        this.servicesConfig = parsedContents;
-        const serviceAd = await prepareServiceAd(this.servicesConfig, runtime);
-        const result = await this.serviceAdsDB.put(serviceAd);
-        this.sellerServiceAdCID = getCIDFromOrbitDbHash(result);
-        elizaLogger2.info("Updated serviceAdsDB with new sellerServices.json contents");
-      }
-    } catch (error) {
-      elizaLogger2.error("Error checking sellerServices.json", error);
-      console.error(error);
-      throw error;
     }
   }
   /*
@@ -1284,10 +1327,6 @@ var PayAIClient = class {
       await this.serviceAdsDB.close();
       await this.buyOffersDB.close();
       await this.agreementsDB.close();
-      if (this.servicesConfigInterval) {
-        clearInterval(this.servicesConfigInterval);
-        this.servicesConfigInterval = null;
-      }
     } catch (error) {
       elizaLogger2.error("Failed to close databases", error);
       throw error;
@@ -1777,7 +1816,7 @@ var acceptOfferAction = {
         elizaLogger5.info(reason);
         if (callback) {
           callback({
-            text: reason,
+            text: `@${state.senderName} ${reason}`,
             action: "ACCEPT_OFFER",
             source: message.content.source
           });
@@ -1793,7 +1832,7 @@ var acceptOfferAction = {
       const result = await payAIClient.agreementsDB.put(agreement);
       const CID3 = getCIDFromOrbitDbHash(result);
       elizaLogger5.info("Published Agreement to IPFS: ", CID3);
-      let responseToUser = `I accepted the offer and signed an agreement. The Agreement's IPFS CID is ${CID3}`;
+      let responseToUser = `@${state.senderName} I accepted the offer and signed an agreement. The Agreement's IPFS CID is ${CID3}`;
       if (callback) {
         const newMemory = {
           userId: message.agentId,
@@ -1814,13 +1853,6 @@ var acceptOfferAction = {
     } catch (error) {
       elizaLogger5.error("Error in ACCEPT_OFFER handler:", error);
       console.error(error);
-      if (callback) {
-        callback({
-          text: "Error processing ACCEPT_OFFER request.",
-          action: "ACCEPT_OFFER",
-          source: message.content.source
-        });
-      }
       return false;
     }
   },
@@ -2300,11 +2332,270 @@ var executeContractAction = {
 };
 var executeContractAction_default = executeContractAction;
 
+// src/actions/startWork.ts
+import {
+  ModelClass as ModelClass6,
+  composeContext as composeContext6,
+  elizaLogger as elizaLogger8,
+  generateText as generateText6,
+  cleanJsonResponse as cleanJsonResponse6,
+  getEmbeddingZeroVector as getEmbeddingZeroVector6
+} from "@elizaos/core";
+var extractTransactionSignatureTemplate = `
+Analyze the following conversation to extract the transaction signature of the contract.
+
+{{recentMessages}}
+
+Return a JSON object containing only the fields where information was clearly found.
+For example:
+{
+    "success": true,
+    "result": {
+        "transactionSignature": "transaction signature of the contract"
+    }
+}
+
+If the user did not provide the transaction signature, then set the "success" field to false and set the result to a string asking the user to provide the missing information.
+For example, if you could not find the transaction signature, then return:
+{
+    "success": false,
+    "result": "Please provide the transaction signature of the contract execution."
+}
+
+Only return a JSON markdown block.
+`;
+var startWorkAction = {
+  name: "START_WORK",
+  similes: ["BEGIN_WORK", "START_WORK_FOR_CONTRACT", "BEGIN_WORK_FOR_CONTRACT"],
+  description: "This action is used to start work by the seller agent after the buyer agent funds and starts the contract.",
+  suppressInitialMessage: true,
+  validate: async (runtime, message) => {
+    return true;
+  },
+  handler: async (runtime, message, state, _options, callback) => {
+    try {
+      if (!state) {
+        state = await runtime.composeState(message);
+      } else {
+        state = await runtime.updateRecentMessageState(state);
+      }
+      const startWorkContext = composeContext6({
+        state,
+        template: extractTransactionSignatureTemplate
+      });
+      const extractedDetailsText = await generateText6({
+        runtime,
+        context: startWorkContext,
+        modelClass: ModelClass6.SMALL
+      });
+      const extractedDetails = JSON.parse(cleanJsonResponse6(extractedDetailsText));
+      if (extractedDetails.success === false) {
+        elizaLogger8.info("Need more information from the user to start work.");
+        if (callback) {
+          callback({
+            text: extractedDetails.result,
+            action: "START_WORK",
+            source: message.content.source
+          });
+        }
+        return false;
+      }
+      const contractAccount = await paymentClient.getContractAccountFromTransaction(extractedDetails.result.transactionSignature);
+      if (!contractAccount) {
+        elizaLogger8.info("Could not find the contract account from the given transaction.");
+        if (callback) {
+          callback({
+            text: "Could not find the contract account from the given transaction. Please verify the transaction signature.",
+            action: "START_WORK",
+            source: message.content.source
+          });
+        }
+        return false;
+      }
+      const contractAccountData = contractAccount.data;
+      const agreement = (await payAIClient.getEntryFromCID(contractAccountData.cid, payAIClient.agreementsDB)).payload.value;
+      const isValidAgreement = await verifyMessage(agreement.identity, agreement.signature, agreement.message);
+      if (!isValidAgreement) {
+        elizaLogger8.info("Agreement signature is invalid.");
+        if (callback) {
+          callback({
+            text: "Agreement signature is invalid.",
+            action: "START_WORK",
+            source: message.content.source
+          });
+        }
+        return false;
+      }
+      const base58PublicKey = await getBase58PublicKey(runtime);
+      if (agreement.identity !== base58PublicKey) {
+        elizaLogger8.info("The Agreement was not signed by my keypair.");
+        if (callback) {
+          callback({
+            text: "Agreement was not signed by my keypair.",
+            action: "START_WORK",
+            source: message.content.source
+          });
+        }
+        return false;
+      }
+      const buyOffer = (await payAIClient.getEntryFromCID(agreement.message.buyOfferCID, payAIClient.buyOffersDB)).payload.value;
+      const isValidBuyOffer2 = await verifyMessage(buyOffer.identity, buyOffer.signature, buyOffer.message);
+      if (!isValidBuyOffer2) {
+        elizaLogger8.info("Buy Offer signature is invalid.");
+        if (callback) {
+          callback({
+            text: "Buy Offer signature is invalid.",
+            action: "START_WORK",
+            source: message.content.source
+          });
+        }
+        return false;
+      }
+      const serviceAd = (await payAIClient.getEntryFromCID(buyOffer.message.serviceAdCID, payAIClient.serviceAdsDB)).payload.value;
+      if (contractAccountData.seller.toString() !== serviceAd.message.wallet) {
+        elizaLogger8.info("The seller's address in the contract does not match the wallet address of the service advertisement.");
+        if (callback) {
+          callback({
+            text: `The seller's address in the contract (${contractAccountData.seller.toString()}) does not match the wallet address of the service advertisement (${serviceAd.message.wallet}).`,
+            action: "START_WORK",
+            source: message.content.source
+          });
+        }
+        return false;
+      }
+      const isValidServiceAd = await verifyMessage(serviceAd.identity, serviceAd.signature, serviceAd.message);
+      if (!isValidServiceAd) {
+        elizaLogger8.info("Service Advertisement signature is invalid.");
+        if (callback) {
+          callback({
+            text: "Service Advertisement signature is invalid.",
+            action: "START_WORK",
+            source: message.content.source
+          });
+        }
+        return false;
+      }
+      if (serviceAd.identity !== base58PublicKey) {
+        elizaLogger8.info("The Service Advertisement was not signed by my keypair.");
+        if (callback) {
+          callback({
+            text: "Service Advertisement was not signed by my keypair.",
+            action: "START_WORK",
+            source: message.content.source
+          });
+        }
+        return false;
+      }
+      const priceString = serviceAd.message.services[parseInt(buyOffer.message.desiredServiceID)].price;
+      const priceMatch = priceString.match(/(\d+\.?\d*)/);
+      if (!priceMatch) {
+        throw new Error(`Could not extract price from string: ${priceString}`);
+      }
+      const priceInSOL = parseFloat(priceString);
+      const units = parseInt(buyOffer.message.desiredUnitAmount);
+      const totalSOL = priceInSOL * units;
+      const lamportsPerSOL = 1e9;
+      const totalLamports = Math.round(totalSOL * lamportsPerSOL).toString();
+      if (contractAccountData.amount.toString() !== totalLamports) {
+        elizaLogger8.info("Contract amount does not match expected amount.");
+        if (callback) {
+          callback({
+            text: `Contract amount (${contractAccountData.amount.toString()}) does not match expected amount (${totalLamports}).`,
+            action: "START_WORK",
+            source: message.content.source
+          });
+        }
+        return false;
+      }
+      let responseToUser = `Thanks for starting the contract. I will start work now!`;
+      if (callback) {
+        const newMemory = {
+          userId: message.agentId,
+          agentId: message.agentId,
+          roomId: message.roomId,
+          content: {
+            text: responseToUser,
+            action: "START_WORK",
+            source: message.content.source
+          },
+          embedding: getEmbeddingZeroVector6()
+        };
+        await runtime.messageManager.createMemory(newMemory);
+        callback(newMemory.content);
+      }
+      return true;
+    } catch (error) {
+      elizaLogger8.error("Error in START_WORK handler:", error);
+      console.error(error);
+      return false;
+    }
+  },
+  examples: [
+    [
+      {
+        user: "{{user1}}",
+        content: {
+          text: "I just started the contract in transaction 4vxNhiUKsUpYkJg42WBVA7wLacZwu2MT5ur8ETfpfrZHQuYFTdbu8PHSmAg1ft283LykP3RyLMEFWktzLCvzAjX3"
+        }
+      },
+      {
+        user: "{{user2}}",
+        content: {
+          text: "Successfully verified the contract. I will start work now."
+        }
+      }
+    ],
+    [
+      {
+        user: "{{user1}}",
+        content: {
+          text: "I started the contract and funded it in transaction 4vxNhiUKsUpYkJg42WBVA7wLacZwu2MT5ur8ETfpfrZHQuYFTdbu8PHSmAg1ft283LykP3RyLMEFWktzLCvzAjX3. Feel free to check it out and start work."
+        }
+      },
+      {
+        user: "{{user2}}",
+        content: {
+          text: "Got it, thanks! I will start work now."
+        }
+      }
+    ],
+    [
+      {
+        user: "{{user1}}",
+        content: {
+          text: "I have funded the contract in transaction 4vxNhiUKsUpYkJg42WBVA7wLacZwu2MT5ur8ETfpfrZHQuYFTdbu8PHSmAg1ft283LykP3RyLMEFWktzLCvzAjX3"
+        }
+      },
+      {
+        user: "{{user2}}",
+        content: {
+          text: "I couldn't find the contract account from the transaction. Please verify the transaction signature and send it to me again."
+        }
+      }
+    ],
+    [
+      {
+        user: "{{user1}}",
+        content: {
+          text: "I have funded the contract in transaction 4vxNhiUKsUpYkJg42WBVA7wLacZwu2MT5ur8ETfpfrZHQuYFTdbu8PHSmAg1ft283LykP3RyLMEFWktzLCvzAjX3"
+        }
+      },
+      {
+        user: "{{user2}}",
+        content: {
+          text: "The Agreement you referenced in your contract was not signed by me. Please verify the contract and send me the transaction id again."
+        }
+      }
+    ]
+  ]
+};
+var startWork_default = startWorkAction;
+
 // src/index.ts
 var payaiPlugin = {
   name: "payai",
   description: "Agents can hire other agents for their services. Agents can make money by selling their services.",
-  actions: [browseAgents_default, makeOfferAction_default, acceptOfferAction_default, advertiseServicesAction_default, executeContractAction_default],
+  actions: [browseAgents_default, makeOfferAction_default, acceptOfferAction_default, advertiseServicesAction_default, executeContractAction_default, startWork_default],
   evaluators: [],
   providers: [],
   services: [],

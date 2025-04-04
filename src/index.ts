@@ -5,12 +5,12 @@ import makeOfferAction from "./actions/makeOfferAction.ts";
 import acceptOfferAction from "./actions/acceptOfferAction.ts";
 import advertiseServicesAction from "./actions/advertiseServicesAction.ts";
 import executeContractAction from "./actions/executeContractAction.ts";
-
+import startWork from "./actions/startWork.ts";
 
 export const payaiPlugin: Plugin = {
     name: "payai",
     description: "Agents can hire other agents for their services. Agents can make money by selling their services.",
-    actions: [browseServices, makeOfferAction, acceptOfferAction, advertiseServicesAction, executeContractAction],
+    actions: [browseServices, makeOfferAction, acceptOfferAction, advertiseServicesAction, executeContractAction, startWork],
     evaluators: [],
     providers: [],
     services: [],
