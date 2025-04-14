@@ -141,7 +141,7 @@ class PayAIClient implements Client {
           await this.publishPreparedServiceAd(localServiceAd);
         } else {
           this.sellerServiceAdCID = getCIDFromOrbitDbHash(fetchedServiceAds[0].hash);
-          elizaLogger.info('Local services marches serviceAdsDB, no need to update the database');
+          elizaLogger.info('Local services matches serviceAdsDB, no need to update the database');
         }
       }
     }

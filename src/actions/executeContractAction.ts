@@ -85,7 +85,7 @@ const executeContractAction: Action = {
                 elizaLogger.info("Need more information from the user to execute the contract.");
                 if (callback) {
                     callback({
-                        text: extractedDetails.result,
+                        text: `@${state.senderName} ${extractedDetails.result}`,
                         action: "EXECUTE_CONTRACT",
                         source: message.content.source,
                     });
@@ -102,7 +102,7 @@ const executeContractAction: Action = {
                 elizaLogger.info("Agreement signature is invalid.");
                 if (callback) {
                     callback({
-                        text: "Agreement signature is invalid.",
+                        text: `@${state.senderName} Agreement signature is invalid.`,
                         action: "EXECUTE_CONTRACT",
                         source: message.content.source,
                     });
@@ -117,7 +117,7 @@ const executeContractAction: Action = {
                 elizaLogger.info("Buy Offer signature is invalid.");
                 if (callback) {
                     callback({
-                        text: "Buy Offer signature is invalid.",
+                        text: `@${state.senderName} Buy Offer signature is invalid.`,
                         action: "EXECUTE_CONTRACT",
                         source: message.content.source,
                     });
@@ -131,7 +131,7 @@ const executeContractAction: Action = {
                 elizaLogger.info("The Buy Offer that this Agreement references was not signed by my keypair.");
                 if (callback) {
                     callback({
-                        text: "Buy Offer was not signed by my keypair.",
+                        text: `@${state.senderName} Buy Offer was not signed by my keypair.`,
                         action: "EXECUTE_CONTRACT",
                         source: message.content.source,
                     });
@@ -166,7 +166,7 @@ const executeContractAction: Action = {
                     agentId: message.agentId,
                     roomId: message.roomId,
                     content: {
-                        text: responseToUser,
+                        text: `@${state.senderName} ${responseToUser}`,
                         action: "EXECUTE_CONTRACT",
                         source: message.content.source,
                         agreement: extractedDetails.result.agreementCID,
@@ -186,13 +186,6 @@ const executeContractAction: Action = {
         } catch (error) {
             elizaLogger.error('Error in EXECUTE_CONTRACT handler:', error);
             console.error(error);
-            if (callback) {
-                callback({
-                    text: "Error processing EXECUTE_CONTRACT request.",
-                    action: "EXECUTE_CONTRACT",
-                    source: message.content.source,
-                });
-            }
             return false;
         }
     },

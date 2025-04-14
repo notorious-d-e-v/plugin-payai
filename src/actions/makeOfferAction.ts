@@ -114,11 +114,11 @@ const makeOfferAction: Action = {
             elizaLogger.debug("extractedDetails:", extractedDetails);
 
             // Validate offer details
-            if (extractedDetails.success === false || extractedDetails.success === "false") {
+            if (extractedDetails.success === false) {
                 elizaLogger.info("Need more information from the user to make an offer.");
                 if (callback) {
                     callback({
-                        text: extractedDetails.result,
+                        text: `@${state.senderName} ${extractedDetails.result}`,
                         action: "MAKE_OFFER",
                         source: message.content.source,
                     });
@@ -154,7 +154,7 @@ const makeOfferAction: Action = {
                     agentId: message.agentId,
                     roomId: message.roomId,
                     content: {
-                        text: responseToUser,
+                        text: `@${state.senderName} ${responseToUser}`,
                         action: "MAKE_OFFER",
                         source: message.content.source,
                         buyOffer: offerDetails,
@@ -172,13 +172,6 @@ const makeOfferAction: Action = {
         } catch (error) {
             elizaLogger.error('Error in MAKE_OFFER handler:', error);
             console.error(error);
-            if (callback) {
-                callback({
-                    text: "Error processing MAKE_OFFER request.",
-                    action: "MAKE_OFFER",
-                    source: message.content.source,
-                });
-            }
             return false;
         }
     },

@@ -1269,7 +1269,7 @@ var PayAIClient = class {
         await this.publishPreparedServiceAd(localServiceAd);
       } else {
         this.sellerServiceAdCID = getCIDFromOrbitDbHash(fetchedServiceAds[0].hash);
-        elizaLogger2.info("Local services marches serviceAdsDB, no need to update the database");
+        elizaLogger2.info("Local services matches serviceAdsDB, no need to update the database");
       }
     }
   }
@@ -1370,11 +1370,147 @@ var PayAIClient = class {
 };
 var payAIClient = new PayAIClient();
 
+// src/services/services.ts
+import { Service, elizaLogger as elizaLogger3, ServiceType, stringToUuid } from "@elizaos/core";
+var PayAIJobManagerService = class extends Service {
+  static get serviceType() {
+    return ServiceType.TEXT_GENERATION;
+  }
+  handleWorkInterval;
+  async initialize(runtime) {
+    this.handleWorkInterval = setInterval(() => {
+      this.handlePayAIWork(runtime);
+    }, 3e4);
+    elizaLogger3.info("PayAIJobManagerService initialized");
+  }
+  async stop() {
+    clearInterval(this.handleWorkInterval);
+    elizaLogger3.info("PayAIJobManagerService stopped");
+  }
+  /**
+   * Handles PayAI work tasks in the background
+   * @param runtime The agent runtime instance
+   */
+  async handlePayAIWork(runtime) {
+    elizaLogger3.debug("Checking for new jobs to work on.");
+    const cacheKey = `${runtime.agentId}-payai-contracts`;
+    const contracts = await runtime.cacheManager.get(cacheKey);
+    if (!contracts) {
+      elizaLogger3.debug("No new jobs to be worked");
+      return;
+    }
+    for (let contract in contracts) {
+      const jobDetails = await runtime.cacheManager.get(
+        `${runtime.agentId}-payai-job-details-contract-${contract}`
+      );
+      if (jobDetails.status === "NOT_STARTED") {
+        try {
+          await runJob(runtime, contract, jobDetails);
+        } catch (error) {
+          console.error(error);
+          elizaLogger3.error(`Error working on job ${jobDetails.agreementCID}:`, error);
+          jobDetails.status = "FAILED";
+          await runtime.cacheManager.set(`${runtime.agentId}-payai-job-details-contract-${contract}`, jobDetails);
+          elizaLogger3.debug("Marked job as FAILED");
+        }
+      } else if (jobDetails.status === "IN_PROGRESS") {
+        elizaLogger3.debug("Job is in progress, need to implement checking if the work is complete.");
+      } else if (jobDetails.status === "COMPLETED") {
+        elizaLogger3.debug("Job is completed, now attempting to deliver the work.");
+        const completedWork = jobDetails.completedWork;
+        const contactInfo = jobDetails.contactInfo;
+        const messageToUser = `@${contactInfo.handle} I've completed the work for this contract. ${completedWork.url}`;
+        const twitterClient = runtime.clients.find((client) => {
+          var _a;
+          if (!client) return false;
+          return ((_a = client == null ? void 0 : client.constructor) == null ? void 0 : _a.name) === "TwitterManager";
+        });
+        try {
+          const newTweet = await twitterClient.post.postTweet(
+            runtime,
+            twitterClient.client,
+            messageToUser,
+            jobDetails.contactInfo.roomId,
+            messageToUser
+          );
+          jobDetails.status = "DELIVERED";
+          await runtime.cacheManager.set(`${runtime.agentId}-payai-job-details-contract-${contract}`, jobDetails);
+          elizaLogger3.debug("Marked job as DELIVERED");
+        } catch (error) {
+          elizaLogger3.error("Error posting new tweet: ", error);
+          console.error(error);
+        }
+      } else if (jobDetails.status === "FAILED") {
+        elizaLogger3.debug("Job failed, now attempting to retry the job.");
+        await runJob(runtime, contract, jobDetails);
+      } else if (jobDetails.status === "DELIVERED") {
+        elizaLogger3.debug("Job delivered, any cleanup work can be done here.");
+        await runtime.cacheManager.remove(`${runtime.agentId}-payai-contracts-${contract}`);
+      } else {
+        elizaLogger3.warn("Unknown job status, dropping job. You should look into this.");
+        elizaLogger3.debug("jobDetails: ", jobDetails);
+        await runtime.cacheManager.remove(`${runtime.agentId}-payai-contracts-${contract}`);
+      }
+    }
+  }
+};
+async function runJob(runtime, contract, jobDetails) {
+  var _a;
+  const callback = async (response, files) => {
+    jobDetails.completedWork = {
+      message: response.text,
+      url: response.url
+    };
+    await runtime.cacheManager.set(`${runtime.agentId}-payai-job-details-contract-${contract}`, jobDetails);
+    return [{
+      userId: jobDetails.elizaMessage.userId,
+      agentId: jobDetails.elizaMessage.agentId,
+      content: {
+        text: response.text,
+        url: response.url
+      },
+      roomId: stringToUuid(`payai-${contract}-${runtime.agentId}`)
+    }];
+  };
+  const serviceToActions = (_a = runtime.character.payai) == null ? void 0 : _a.serviceToActions;
+  const buyOffer = jobDetails.buyOffer;
+  const desiredServiceID = buyOffer.desiredServiceID;
+  const desiredUnitAmount = buyOffer.desiredUnitAmount;
+  const action = serviceToActions[desiredServiceID];
+  jobDetails.status = "IN_PROGRESS";
+  await runtime.cacheManager.set(`${runtime.agentId}-payai-job-details-contract-${contract}`, jobDetails);
+  elizaLogger3.debug("marked job as IN_PROGRESS");
+  for (let i = 0; i < desiredUnitAmount; i++) {
+    await runtime.processActions(
+      jobDetails.elizaMessage,
+      [
+        {
+          userId: jobDetails.elizaMessage.userId,
+          agentId: jobDetails.elizaMessage.agentId,
+          roomId: jobDetails.elizaMessage.roomId,
+          content: {
+            text: "",
+            action,
+            source: jobDetails.elizaMessage.content.source
+          },
+          embedding: []
+        }
+      ],
+      void 0,
+      callback
+    );
+  }
+  jobDetails.status = "COMPLETED";
+  await runtime.cacheManager.set(`${runtime.agentId}-payai-job-details-contract-${contract}`, jobDetails);
+  elizaLogger3.debug("Marked job as COMPLETED");
+}
+var payAIJobManagerService = new PayAIJobManagerService();
+
 // src/actions/browseAgents.ts
 import {
   ModelClass,
   composeContext,
-  elizaLogger as elizaLogger3,
+  elizaLogger as elizaLogger4,
   generateText,
   getEmbeddingZeroVector,
   cleanJsonResponse
@@ -1461,10 +1597,10 @@ var browseAgents = {
         context: findMatchingServicesContext,
         modelClass: ModelClass.LARGE
       });
-      elizaLogger3.debug("found these matching services from the conversation:", findMatchingServicesContent);
+      elizaLogger4.debug("found these matching services from the conversation:", findMatchingServicesContent);
       const matchingServices = JSON.parse(cleanJsonResponse(findMatchingServicesContent));
       if (matchingServices.success === false || matchingServices.success === "false") {
-        elizaLogger3.info("Couldn't find any services matching the user's request.");
+        elizaLogger4.info("Couldn't find any services matching the user's request.");
         if (callback) {
           callback({
             text: matchingServices.result,
@@ -1532,7 +1668,7 @@ var browseAgents_default = browseAgents;
 import {
   ModelClass as ModelClass2,
   composeContext as composeContext2,
-  elizaLogger as elizaLogger4,
+  elizaLogger as elizaLogger5,
   generateText as generateText2,
   cleanJsonResponse as cleanJsonResponse2,
   getEmbeddingZeroVector as getEmbeddingZeroVector2
@@ -1611,14 +1747,14 @@ var makeOfferAction = {
         context: makeOfferContext,
         modelClass: ModelClass2.SMALL
       });
-      elizaLogger4.debug("extractedDetailsText:", extractedDetailsText);
+      elizaLogger5.debug("extractedDetailsText:", extractedDetailsText);
       const extractedDetails = JSON.parse(cleanJsonResponse2(extractedDetailsText));
-      elizaLogger4.debug("extractedDetails:", extractedDetails);
-      if (extractedDetails.success === false || extractedDetails.success === "false") {
-        elizaLogger4.info("Need more information from the user to make an offer.");
+      elizaLogger5.debug("extractedDetails:", extractedDetails);
+      if (extractedDetails.success === false) {
+        elizaLogger5.info("Need more information from the user to make an offer.");
         if (callback) {
           callback({
-            text: extractedDetails.result,
+            text: `@${state.senderName} ${extractedDetails.result}`,
             action: "MAKE_OFFER",
             source: message.content.source
           });
@@ -1631,10 +1767,10 @@ var makeOfferAction = {
         desiredUnitAmount: extractedDetails.result.desiredUnitAmount
       };
       const buyOffer = await prepareBuyOffer(offerDetails, runtime);
-      elizaLogger4.debug("Publishing buy offer to IPFS:", buyOffer);
+      elizaLogger5.debug("Publishing buy offer to IPFS:", buyOffer);
       const result = await payAIClient.buyOffersDB.put(buyOffer);
       const CID3 = getCIDFromOrbitDbHash(result);
-      elizaLogger4.info("Published Buy Offer to IPFS: ", CID3);
+      elizaLogger5.info("Published Buy Offer to IPFS: ", CID3);
       let responseToUser = `Successfully made an offer for ${offerDetails.desiredUnitAmount} units of service ID ${offerDetails.desiredServiceID} from seller ${extractedDetails.result.wallet}.`;
       responseToUser += `
 Your Buy Offer's IPFS CID is ${CID3}`;
@@ -1644,7 +1780,7 @@ Your Buy Offer's IPFS CID is ${CID3}`;
           agentId: message.agentId,
           roomId: message.roomId,
           content: {
-            text: responseToUser,
+            text: `@${state.senderName} ${responseToUser}`,
             action: "MAKE_OFFER",
             source: message.content.source,
             buyOffer: offerDetails
@@ -1656,15 +1792,8 @@ Your Buy Offer's IPFS CID is ${CID3}`;
       }
       return true;
     } catch (error) {
-      elizaLogger4.error("Error in MAKE_OFFER handler:", error);
+      elizaLogger5.error("Error in MAKE_OFFER handler:", error);
       console.error(error);
-      if (callback) {
-        callback({
-          text: "Error processing MAKE_OFFER request.",
-          action: "MAKE_OFFER",
-          source: message.content.source
-        });
-      }
       return false;
     }
   },
@@ -1752,7 +1881,7 @@ var makeOfferAction_default = makeOfferAction;
 import {
   ModelClass as ModelClass3,
   composeContext as composeContext3,
-  elizaLogger as elizaLogger5,
+  elizaLogger as elizaLogger6,
   generateText as generateText3,
   cleanJsonResponse as cleanJsonResponse3,
   getEmbeddingZeroVector as getEmbeddingZeroVector3
@@ -1804,13 +1933,13 @@ var acceptOfferAction = {
         context: acceptOfferContext,
         modelClass: ModelClass3.SMALL
       });
-      elizaLogger5.debug("extracted the following Buy Offer CID from the conversation:", extractedDetailsText);
+      elizaLogger6.debug("extracted the following Buy Offer CID from the conversation:", extractedDetailsText);
       const extractedDetails = JSON.parse(cleanJsonResponse3(extractedDetailsText));
       if (extractedDetails.success === false || extractedDetails.success === "false") {
-        elizaLogger5.info("Need more information from the user to accept the offer.");
+        elizaLogger6.info("Need more information from the user to accept the offer.");
         if (callback) {
           callback({
-            text: extractedDetails.result,
+            text: `@${state.senderName} ${extractedDetails.result}`,
             action: "ACCEPT_OFFER",
             source: message.content.source
           });
@@ -1819,7 +1948,7 @@ var acceptOfferAction = {
       }
       const { isValid, reason } = await isValidBuyOffer(extractedDetails.result.buyOfferCID, runtime);
       if (!isValid) {
-        elizaLogger5.info(reason);
+        elizaLogger6.info(reason);
         if (callback) {
           callback({
             text: `@${state.senderName} ${reason}`,
@@ -1834,18 +1963,18 @@ var acceptOfferAction = {
         accept: true
       };
       const agreement = await prepareAgreement(agreementDetails, runtime);
-      elizaLogger5.debug("Publishing agreement to IPFS:", agreement);
+      elizaLogger6.debug("Publishing agreement to IPFS:", agreement);
       const result = await payAIClient.agreementsDB.put(agreement);
       const CID3 = getCIDFromOrbitDbHash(result);
-      elizaLogger5.info("Published Agreement to IPFS: ", CID3);
-      let responseToUser = `@${state.senderName} I accepted the offer and signed an agreement. The Agreement's IPFS CID is ${CID3}`;
+      elizaLogger6.info("Published Agreement to IPFS: ", CID3);
+      let responseToUser = `I accepted the offer and signed an agreement. The Agreement's IPFS CID is ${CID3}`;
       if (callback) {
         const newMemory = {
           userId: message.agentId,
           agentId: message.agentId,
           roomId: message.roomId,
           content: {
-            text: responseToUser,
+            text: `@${state.senderName} ${responseToUser}`,
             action: "ACCEPT_OFFER",
             source: message.content.source,
             agreement: agreementDetails
@@ -1857,7 +1986,7 @@ var acceptOfferAction = {
       }
       return true;
     } catch (error) {
-      elizaLogger5.error("Error in ACCEPT_OFFER handler:", error);
+      elizaLogger6.error("Error in ACCEPT_OFFER handler:", error);
       console.error(error);
       return false;
     }
@@ -1961,7 +2090,7 @@ var acceptOfferAction_default = acceptOfferAction;
 import {
   ModelClass as ModelClass4,
   composeContext as composeContext4,
-  elizaLogger as elizaLogger6,
+  elizaLogger as elizaLogger7,
   generateText as generateText4,
   getEmbeddingZeroVector as getEmbeddingZeroVector4,
   cleanJsonResponse as cleanJsonResponse4
@@ -2005,7 +2134,7 @@ var advertiseServicesAction = {
   suppressInitialMessage: true,
   validate: async (runtime, message) => {
     if (message.content.source !== "direct") {
-      elizaLogger6.debug("SELL_SERVICES action is only allowed when interacting with the direct client. This message was from:", message.content.source);
+      elizaLogger7.debug("SELL_SERVICES action is only allowed when interacting with the direct client. This message was from:", message.content.source);
       return false;
     }
     return true;
@@ -2026,11 +2155,11 @@ var advertiseServicesAction = {
         context: extractServicesContext,
         modelClass: ModelClass4.SMALL
       });
-      elizaLogger6.debug("extracted services from generateText:", extractedServicesText);
+      elizaLogger7.debug("extracted services from generateText:", extractedServicesText);
       const extractedServices = JSON.parse(cleanJsonResponse4(extractedServicesText));
-      elizaLogger6.debug("extracted the following services from the conversation:", extractedServicesText);
+      elizaLogger7.debug("extracted the following services from the conversation:", extractedServicesText);
       if (extractedServices.success === false || extractedServices.success === "false") {
-        elizaLogger6.info("Need more information from the user to advertise services.");
+        elizaLogger7.info("Need more information from the user to advertise services.");
         if (callback) {
           callback({
             text: extractedServices.result,
@@ -2044,9 +2173,9 @@ var advertiseServicesAction = {
       const CID3 = await payAIClient.publishPreparedServiceAd(serviceAd);
       let responseToUser = `Successfully advertised your services. Your Service Ad's IPFS CID is ${CID3}`;
       const servicesFilePath = payAIClient.servicesConfigPath;
-      elizaLogger6.debug("Updating the local services file with the seller's services");
+      elizaLogger7.debug("Updating the local services file with the seller's services");
       payAIClient.saveSellerServices(JSON.stringify(extractedServices.result, null, 2));
-      elizaLogger6.info("Updated services file locally at:", servicesFilePath);
+      elizaLogger7.info("Updated services file locally at:", servicesFilePath);
       if (callback) {
         const newMemory = {
           userId: message.agentId,
@@ -2065,7 +2194,7 @@ var advertiseServicesAction = {
       }
       return true;
     } catch (error) {
-      elizaLogger6.error("Error in SELL_SERVICES handler:", error);
+      elizaLogger7.error("Error in SELL_SERVICES handler:", error);
       console.error(error);
       if (callback) {
         callback({
@@ -2129,7 +2258,7 @@ var advertiseServicesAction_default = advertiseServicesAction;
 import {
   ModelClass as ModelClass5,
   composeContext as composeContext5,
-  elizaLogger as elizaLogger7,
+  elizaLogger as elizaLogger8,
   generateText as generateText5,
   cleanJsonResponse as cleanJsonResponse5,
   getEmbeddingZeroVector as getEmbeddingZeroVector5
@@ -2181,13 +2310,13 @@ var executeContractAction = {
         context: executeContractContext,
         modelClass: ModelClass5.SMALL
       });
-      elizaLogger7.debug("extracted the following Agreement CID from the conversation:", extractedDetailsText);
+      elizaLogger8.debug("extracted the following Agreement CID from the conversation:", extractedDetailsText);
       const extractedDetails = JSON.parse(cleanJsonResponse5(extractedDetailsText));
       if (extractedDetails.success === false || extractedDetails.success === "false") {
-        elizaLogger7.info("Need more information from the user to execute the contract.");
+        elizaLogger8.info("Need more information from the user to execute the contract.");
         if (callback) {
           callback({
-            text: extractedDetails.result,
+            text: `@${state.senderName} ${extractedDetails.result}`,
             action: "EXECUTE_CONTRACT",
             source: message.content.source
           });
@@ -2198,10 +2327,10 @@ var executeContractAction = {
       ;
       const isValidAgreement = await verifyMessage(agreement.identity, agreement.signature, agreement.message);
       if (!isValidAgreement) {
-        elizaLogger7.info("Agreement signature is invalid.");
+        elizaLogger8.info("Agreement signature is invalid.");
         if (callback) {
           callback({
-            text: "Agreement signature is invalid.",
+            text: `@${state.senderName} Agreement signature is invalid.`,
             action: "EXECUTE_CONTRACT",
             source: message.content.source
           });
@@ -2212,10 +2341,10 @@ var executeContractAction = {
       ;
       const isValidBuyOffer2 = await verifyMessage(buyOffer.identity, buyOffer.signature, buyOffer.message);
       if (!isValidBuyOffer2) {
-        elizaLogger7.info("Buy Offer signature is invalid.");
+        elizaLogger8.info("Buy Offer signature is invalid.");
         if (callback) {
           callback({
-            text: "Buy Offer signature is invalid.",
+            text: `@${state.senderName} Buy Offer signature is invalid.`,
             action: "EXECUTE_CONTRACT",
             source: message.content.source
           });
@@ -2224,10 +2353,10 @@ var executeContractAction = {
       }
       const base58PublicKey = await getBase58PublicKey(runtime);
       if (buyOffer.identity !== base58PublicKey) {
-        elizaLogger7.info("The Buy Offer that this Agreement references was not signed by my keypair.");
+        elizaLogger8.info("The Buy Offer that this Agreement references was not signed by my keypair.");
         if (callback) {
           callback({
-            text: "Buy Offer was not signed by my keypair.",
+            text: `@${state.senderName} Buy Offer was not signed by my keypair.`,
             action: "EXECUTE_CONTRACT",
             source: message.content.source
           });
@@ -2253,7 +2382,7 @@ var executeContractAction = {
           agentId: message.agentId,
           roomId: message.roomId,
           content: {
-            text: responseToUser,
+            text: `@${state.senderName} ${responseToUser}`,
             action: "EXECUTE_CONTRACT",
             source: message.content.source,
             agreement: extractedDetails.result.agreementCID
@@ -2266,15 +2395,8 @@ var executeContractAction = {
       await payAIClient.fundedContractsDB.add(tx.toString());
       return true;
     } catch (error) {
-      elizaLogger7.error("Error in EXECUTE_CONTRACT handler:", error);
+      elizaLogger8.error("Error in EXECUTE_CONTRACT handler:", error);
       console.error(error);
-      if (callback) {
-        callback({
-          text: "Error processing EXECUTE_CONTRACT request.",
-          action: "EXECUTE_CONTRACT",
-          source: message.content.source
-        });
-      }
       return false;
     }
   },
@@ -2343,7 +2465,7 @@ var executeContractAction_default = executeContractAction;
 import {
   ModelClass as ModelClass6,
   composeContext as composeContext6,
-  elizaLogger as elizaLogger8,
+  elizaLogger as elizaLogger9,
   generateText as generateText6,
   cleanJsonResponse as cleanJsonResponse6,
   getEmbeddingZeroVector as getEmbeddingZeroVector6
@@ -2397,7 +2519,7 @@ var startWorkAction = {
       });
       const extractedDetails = JSON.parse(cleanJsonResponse6(extractedDetailsText));
       if (extractedDetails.success === false) {
-        elizaLogger8.info("Need more information from the user to start work.");
+        elizaLogger9.info("Need more information from the user to start work.");
         if (callback) {
           callback({
             text: extractedDetails.result,
@@ -2409,7 +2531,7 @@ var startWorkAction = {
       }
       const contractAccount = await paymentClient.getContractAccountFromTransaction(extractedDetails.result.transactionSignature);
       if (!contractAccount) {
-        elizaLogger8.info("Could not find the contract account from the given transaction.");
+        elizaLogger9.info("Could not find the contract account from the given transaction.");
         if (callback) {
           callback({
             text: "Could not find the contract account from the given transaction. Please verify the transaction signature.",
@@ -2423,7 +2545,7 @@ var startWorkAction = {
       const agreement = (await payAIClient.getEntryFromCID(contractAccountData.cid, payAIClient.agreementsDB)).payload.value;
       const isValidAgreement = await verifyMessage(agreement.identity, agreement.signature, agreement.message);
       if (!isValidAgreement) {
-        elizaLogger8.info("Agreement signature is invalid.");
+        elizaLogger9.info("Agreement signature is invalid.");
         if (callback) {
           callback({
             text: "Agreement signature is invalid.",
@@ -2435,7 +2557,7 @@ var startWorkAction = {
       }
       const base58PublicKey = await getBase58PublicKey(runtime);
       if (agreement.identity !== base58PublicKey) {
-        elizaLogger8.info("The Agreement was not signed by my keypair.");
+        elizaLogger9.info("The Agreement was not signed by my keypair.");
         if (callback) {
           callback({
             text: "Agreement was not signed by my keypair.",
@@ -2448,7 +2570,7 @@ var startWorkAction = {
       const buyOffer = (await payAIClient.getEntryFromCID(agreement.message.buyOfferCID, payAIClient.buyOffersDB)).payload.value;
       const isValidBuyOffer2 = await verifyMessage(buyOffer.identity, buyOffer.signature, buyOffer.message);
       if (!isValidBuyOffer2) {
-        elizaLogger8.info("Buy Offer signature is invalid.");
+        elizaLogger9.info("Buy Offer signature is invalid.");
         if (callback) {
           callback({
             text: "Buy Offer signature is invalid.",
@@ -2460,7 +2582,7 @@ var startWorkAction = {
       }
       const serviceAd = (await payAIClient.getEntryFromCID(buyOffer.message.serviceAdCID, payAIClient.serviceAdsDB)).payload.value;
       if (contractAccountData.seller.toString() !== serviceAd.message.wallet) {
-        elizaLogger8.info("The seller's address in the contract does not match the wallet address of the service advertisement.");
+        elizaLogger9.info("The seller's address in the contract does not match the wallet address of the service advertisement.");
         if (callback) {
           callback({
             text: `The seller's address in the contract (${contractAccountData.seller.toString()}) does not match the wallet address of the service advertisement (${serviceAd.message.wallet}).`,
@@ -2472,7 +2594,7 @@ var startWorkAction = {
       }
       const isValidServiceAd = await verifyMessage(serviceAd.identity, serviceAd.signature, serviceAd.message);
       if (!isValidServiceAd) {
-        elizaLogger8.info("Service Advertisement signature is invalid.");
+        elizaLogger9.info("Service Advertisement signature is invalid.");
         if (callback) {
           callback({
             text: "Service Advertisement signature is invalid.",
@@ -2483,7 +2605,7 @@ var startWorkAction = {
         return false;
       }
       if (serviceAd.identity !== base58PublicKey) {
-        elizaLogger8.info("The Service Advertisement was not signed by my keypair.");
+        elizaLogger9.info("The Service Advertisement was not signed by my keypair.");
         if (callback) {
           callback({
             text: "Service Advertisement was not signed by my keypair.",
@@ -2504,7 +2626,7 @@ var startWorkAction = {
       const lamportsPerSOL = 1e9;
       const totalLamports = Math.round(totalSOL * lamportsPerSOL).toString();
       if (contractAccountData.amount.toString() !== totalLamports) {
-        elizaLogger8.info("Contract amount does not match expected amount.");
+        elizaLogger9.info("Contract amount does not match expected amount.");
         if (callback) {
           callback({
             text: `Contract amount (${contractAccountData.amount.toString()}) does not match expected amount (${totalLamports}).`,
@@ -2514,25 +2636,60 @@ var startWorkAction = {
         }
         return false;
       }
-      let responseToUser = `Thanks for starting the contract. I will start work now!`;
+      const contractAddress = contractAccount.address.toString();
+      let jobs = await runtime.cacheManager.get(`${message.agentId}-payai-contracts`);
+      if (jobs === void 0) {
+        jobs = {};
+      }
+      jobs[contractAddress] = contractAddress;
+      await runtime.cacheManager.set(`${runtime.agentId}-payai-contracts`, jobs);
+      const jobsFromCache = await runtime.cacheManager.get(`${runtime.agentId}-payai-contracts`);
+      const jobDetails = {
+        agreementCID: contractAccountData.cid,
+        agreement: agreement.message,
+        buyOfferCID: agreement.message.buyOfferCID,
+        buyOffer: buyOffer.message,
+        serviceAdCID: buyOffer.message.serviceAdCID,
+        serviceAd: serviceAd.message,
+        contractAddress: contractAccount.address,
+        contractFundedAmount: totalLamports,
+        contractBuyer: contractAccountData.buyer.toString(),
+        contractSeller: contractAccountData.seller.toString(),
+        contactInfo: {
+          client: state.recentMessagesData[0].content.source || message.content.source,
+          roomId: state.recentMessagesData[0].roomId || message.roomId,
+          handle: state.senderName || message.senderName,
+          conversationId: state.recentMessagesData[0].content.url || message.content.url
+        },
+        elizaMessage: {
+          userId: message.userId,
+          agentId: message.agentId,
+          roomId: message.roomId,
+          content: message.content
+        },
+        status: "NOT_STARTED"
+      };
+      const cacheKey = `${runtime.agentId}-payai-job-details-contract-${contractAccount.address}`;
+      await runtime.cacheManager.set(cacheKey, jobDetails);
+      let responseToUser = `Thanks for funding the contract. I will start work now!`;
       if (callback) {
         const newMemory = {
           userId: message.agentId,
           agentId: message.agentId,
           roomId: message.roomId,
           content: {
-            text: responseToUser,
+            text: `@${state.senderName} ${responseToUser}`,
             action: "START_WORK",
             source: message.content.source
           },
           embedding: getEmbeddingZeroVector6()
         };
         await runtime.messageManager.createMemory(newMemory);
-        callback(newMemory.content);
+        const callbackResponse = await callback(newMemory.content);
       }
       return true;
     } catch (error) {
-      elizaLogger8.error("Error in START_WORK handler:", error);
+      elizaLogger9.error("Error in START_WORK handler:", error);
       console.error(error);
       return false;
     }
@@ -2605,7 +2762,7 @@ var payaiPlugin = {
   actions: [browseAgents_default, makeOfferAction_default, acceptOfferAction_default, advertiseServicesAction_default, executeContractAction_default, startWork_default],
   evaluators: [],
   providers: [],
-  services: [],
+  services: [payAIJobManagerService],
   clients: [payAIClient]
 };
 var index_default = payaiPlugin;

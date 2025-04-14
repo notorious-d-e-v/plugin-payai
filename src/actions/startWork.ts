@@ -14,6 +14,7 @@ import {
 import { payAIClient } from '../clients/client.ts';
 import { paymentClient } from '../payment.ts';
 import { verifyMessage, getBase58PublicKey } from '../utils.ts';
+import { JobDetails } from '../types.ts';
 
 interface ContractDetails {
     transactionSignature: string;
@@ -222,8 +223,51 @@ const startWorkAction: Action = {
                 return false;
             }
 
-            let responseToUser = `Thanks for starting the contract. I will start work now!`;
+            // add the contract to the agent's current jobs
+            const contractAddress = contractAccount.address.toString();
+            let jobs: { [key: string]: string } = await runtime.cacheManager.get(`${message.agentId}-payai-contracts`);
+            if (jobs === undefined) {
+                jobs = {};
+            }
+            jobs[contractAddress] = contractAddress;
+            await runtime.cacheManager.set(`${runtime.agentId}-payai-contracts`, jobs);
+            
+            // for debugging purposes, get the cache and log it
+            const jobsFromCache = await runtime.cacheManager.get(`${runtime.agentId}-payai-contracts`);
+            
+            // store details about the contract in the agent's cache/db
+            // which will later be used to start work and deliver work
+            const jobDetails: JobDetails = {
+                agreementCID: contractAccountData.cid,
+                agreement: agreement.message,
+                buyOfferCID: agreement.message.buyOfferCID,
+                buyOffer: buyOffer.message,
+                serviceAdCID: buyOffer.message.serviceAdCID,
+                serviceAd: serviceAd.message,
+                contractAddress: contractAccount.address,
+                contractFundedAmount: totalLamports,
+                contractBuyer: contractAccountData.buyer.toString(),
+                contractSeller: contractAccountData.seller.toString(),
+                contactInfo: {
+                    client: state.recentMessagesData[0].content.source || message.content.source,
+                    roomId: state.recentMessagesData[0].roomId || message.roomId,
+                    handle: state.senderName || message.senderName,
+                    conversationId: state.recentMessagesData[0].content.url || message.content.url,
+                },
+                elizaMessage: {
+                    userId: message.userId,
+                    agentId: message.agentId,
+                    roomId: message.roomId,
+                    content: message.content,
+                },
+                status: "NOT_STARTED",
+            };
+            const cacheKey = `${runtime.agentId}-payai-job-details-contract-${contractAccount.address}`;
+            await runtime.cacheManager.set(cacheKey, jobDetails);
 
+            // send message to the user
+            // TODO: send a more natural response to the user using generateText
+            let responseToUser = `Thanks for funding the contract. I will start work now!`;
             if (callback) {
                 // create new memory of the message to the user
                 const newMemory: Memory = {
@@ -231,7 +275,7 @@ const startWorkAction: Action = {
                     agentId: message.agentId,
                     roomId: message.roomId,
                     content: {
-                        text: responseToUser,
+                        text: `@${state.senderName} ${responseToUser}`,
                         action: "START_WORK",
                         source: message.content.source,
                     },
@@ -240,7 +284,7 @@ const startWorkAction: Action = {
                 await runtime.messageManager.createMemory(newMemory);
 
                 // send message to the user
-                callback(newMemory.content);
+                const callbackResponse = await callback(newMemory.content);
             }
 
             return true;

@@ -1,5 +1,6 @@
 import type { Plugin } from "@elizaos/core";
 import { payAIClient } from "./clients/client.ts";
+import { payAIJobManagerService } from "./services/services.ts";
 import browseServices from "./actions/browseAgents.ts";
 import makeOfferAction from "./actions/makeOfferAction.ts";
 import acceptOfferAction from "./actions/acceptOfferAction.ts";
@@ -13,7 +14,7 @@ export const payaiPlugin: Plugin = {
     actions: [browseServices, makeOfferAction, acceptOfferAction, advertiseServicesAction, executeContractAction, startWork],
     evaluators: [],
     providers: [],
-    services: [],
+    services: [payAIJobManagerService],
     clients: [payAIClient]
 };
 
