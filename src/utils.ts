@@ -306,3 +306,11 @@ function sortObjectByKey(message: object): object {
     }, {});
     return sortedMessage;
 }
+
+export async function getTwitterClientFromRuntime(runtime: IAgentRuntime): Promise<any> {
+    const twitterClient = runtime.clients.find((client) => {
+        if (!client) return false;
+        return (client?.constructor?.name === "TwitterManager");
+    });
+    return twitterClient;
+}

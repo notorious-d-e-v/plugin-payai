@@ -1,7 +1,7 @@
 /* Services will eventually be moved in here. This will include OrbitDB, IPFS, and any other services that are needed. */
 import { Service, IAgentRuntime, elizaLogger, ServiceType, Content, HandlerCallback, stringToUuid } from "@elizaos/core"
 import { JobDetails } from "../types.ts";
-
+import { getTwitterClientFromRuntime } from "../utils.ts";
 class PayAIJobManagerService extends Service {
     static get serviceType(): ServiceType {
         return ServiceType.TEXT_GENERATION;
@@ -79,11 +79,7 @@ class PayAIJobManagerService extends Service {
                 const messageToUser = `@${contactInfo.handle} I've completed the work for this contract. ${completedWork.url}`;
 
                 // post the new tweet
-                const twitterClient = runtime.clients.find((client) => {
-                    if (!client) return false;
-                    return (client?.constructor?.name === "TwitterManager");
-                });
-
+                const twitterClient = await getTwitterClientFromRuntime(runtime);
                 try {
                     const newTweet = await twitterClient.post.postTweet(
                         runtime,

@@ -21,7 +21,7 @@ interface ContractDetails {
 }
 
 const extractTransactionSignatureTemplate = `
-Analyze the following conversation to extract the transaction signature of the contract.
+Analyze the following conversation to extract the transaction signature of the contract that funded the work.
 
 {{recentMessages}}
 
