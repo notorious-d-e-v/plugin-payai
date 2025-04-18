@@ -1,7 +1,35 @@
 /* Services will eventually be moved in here. This will include OrbitDB, IPFS, and any other services that are needed. */
-import { Service, IAgentRuntime, elizaLogger, ServiceType, Content, HandlerCallback, stringToUuid } from "@elizaos/core"
+import { Service, IAgentRuntime, elizaLogger, ServiceType, Content, HandlerCallback, stringToUuid, composeContext, generateText, ModelClass, cleanJsonResponse } from "@elizaos/core"
 import { JobDetails } from "../types.ts";
 import { getTwitterClientFromRuntime } from "../utils.ts";
+
+const successfulResponseToUserTemplate = `
+# About {{agentName}}
+{{bio}}
+{{lore}}
+
+# Task:
+Create a twitter post responding to the buyer letting them know that you have completed the work for this job.
+Ask them to review the work and then release the payment if they are happy with the work.
+Your response should be 260 characters or less.
+The completed work is available at the following URL: {{completedWorkUrl}}
+Don't tag the user in your response.
+
+Here is a preview of the completed work:
+{{previewOfCompletedWork}}
+
+Here is your previous conversation with the buyer:
+{{recentMessages}}
+
+For example:
+{
+    "success": true,
+    "result": "A natural message informing the user that the work has been completed, asking them to review the work, and including the URL to the work."
+}
+
+Return JSON markdown only.
+` 
+
 class PayAIJobManagerService extends Service {
     static get serviceType(): ServiceType {
         return ServiceType.TEXT_GENERATION;
@@ -13,7 +41,7 @@ class PayAIJobManagerService extends Service {
         // run handlePayAIWork every 60 seconds
         this.handleWorkInterval = setInterval(() => {
             this.handlePayAIWork(runtime);
-        }, 30000);
+        }, 60000);
 
         elizaLogger.info("PayAIJobManagerService initialized");
     }
@@ -69,24 +97,42 @@ class PayAIJobManagerService extends Service {
             }
 
             else if (jobDetails.status === "COMPLETED") {
-                // TODO: remove the contract from the cache and remove the job details from the cache
                 elizaLogger.debug("Job is completed, now attempting to deliver the work.")
 
-                // read the completed work from the job details
-                // and send the completed work to the buyer using the contact info from the job details
-                const completedWork = jobDetails.completedWork;
+                // prepare a response to the buyer letting them know that the work is completed
+                const completedWorkUrl = jobDetails.completedWork.url;
+                const previewOfCompletedWork = jobDetails.completedWork.message;
                 const contactInfo = jobDetails.contactInfo;
-                const messageToUser = `@${contactInfo.handle} I've completed the work for this contract. ${completedWork.url}`;
+                const state = await runtime.composeState(jobDetails.elizaMessage, 
+                    {completedWorkUrl, previewOfCompletedWork}
+                );
 
-                // post the new tweet
+                const successfulResponseToUserContext = composeContext({
+                    state,
+                    template: successfulResponseToUserTemplate,
+                });
+    
+                const successfulResponseToUserText = await generateText({
+                    runtime,
+                    context: successfulResponseToUserContext,
+                    modelClass: ModelClass.LARGE,
+                });
+    
+                const successfulResponseToUser = JSON.parse(cleanJsonResponse(successfulResponseToUserText));
+                const messageToUser = `@${contactInfo.handle} ${successfulResponseToUser.result}`;
+                
+                // send the completed work to the buyer using the contact info from the job details
                 const twitterClient = await getTwitterClientFromRuntime(runtime);
+                // take the conversationId URL and split it on the / and take the last part
+                const coversationId = jobDetails.contactInfo.conversationId.split("/").pop();
                 try {
-                    const newTweet = await twitterClient.post.postTweet(
+                    await twitterClient.post.postTweet(
                         runtime,
                         twitterClient.client,
                         messageToUser,
                         jobDetails.contactInfo.roomId,
                         messageToUser,
+                        coversationId
                     );
 
                     // mark the job as delivered
@@ -111,8 +157,8 @@ class PayAIJobManagerService extends Service {
             else if (jobDetails.status === "DELIVERED") {
                 elizaLogger.debug("Job delivered, any cleanup work can be done here.")
                 // remove the contract from the cache
-                await runtime.cacheManager.remove(`${runtime.agentId}-payai-contracts-${contract}`);
-                
+                await runtime.cacheManager.delete(`${runtime.agentId}-payai-contracts-${contract}`);      
+                elizaLogger.debug("Contract removed from cache");
                 // TODO: create an orbitdb database to store completed job and details
             }
 
@@ -122,7 +168,7 @@ class PayAIJobManagerService extends Service {
                 elizaLogger.debug("jobDetails: ", jobDetails);
 
                 // remove the contract from the cache
-                await runtime.cacheManager.remove(`${runtime.agentId}-payai-contracts-${contract}`);
+                await runtime.cacheManager.delete(`${runtime.agentId}-payai-contracts-${contract}`);
             }
         }
     }
@@ -140,7 +186,7 @@ async function runJob(runtime: IAgentRuntime, contract: string, jobDetails: JobD
         };
         // update the job details in the cache
         await runtime.cacheManager.set(`${runtime.agentId}-payai-job-details-contract-${contract}`, jobDetails);
-
+        
         return [{
             userId: jobDetails.elizaMessage.userId,
             agentId: jobDetails.elizaMessage.agentId,
@@ -167,6 +213,11 @@ async function runJob(runtime: IAgentRuntime, contract: string, jobDetails: JobD
     await runtime.cacheManager.set(`${runtime.agentId}-payai-job-details-contract-${contract}`, jobDetails);
     elizaLogger.debug("marked job as IN_PROGRESS");
     
+    // compose the state
+    const state = await runtime.composeState(jobDetails.elizaMessage, {
+        jobDetails: jobDetails,
+    });
+
     // loop through the range of 0 to desiredUnitAmount
     for (let i = 0; i < desiredUnitAmount; i++) {
         // execute the action
@@ -185,15 +236,25 @@ async function runJob(runtime: IAgentRuntime, contract: string, jobDetails: JobD
                     embedding: []
                 }
             ],
-            undefined,
-            callback
+            state,
+            (response: Content) => {
+                return callback(response);
+            }
         )
     }
 
     // job is completed, mark it as completed in cache
-    jobDetails.status = "COMPLETED";
+    // refetch the jobDetails from the cache as they were updated in the callback
+    jobDetails = await runtime.cacheManager.get<JobDetails>(`${runtime.agentId}-payai-job-details-contract-${contract}`);
+    if (jobDetails?.completedWork?.url) {
+        jobDetails.status = "COMPLETED";
+        elizaLogger.debug("Marked job as COMPLETED");
+    }
+    else {
+        jobDetails.status = "FAILED";
+        elizaLogger.debug("Marked job as FAILED");
+    }
     await runtime.cacheManager.set(`${runtime.agentId}-payai-job-details-contract-${contract}`, jobDetails);
-    elizaLogger.debug("Marked job as COMPLETED");
 }
 
 export const payAIJobManagerService = new PayAIJobManagerService();

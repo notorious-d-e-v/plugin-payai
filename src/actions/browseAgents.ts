@@ -23,10 +23,11 @@ Analyze the following conversation to extract a list of services that match what
 The Service Name is the name of the service that the Seller is offering.
 The Service Description is a brief description of the service.
 The Service Price is the price of the service.
+The Required Info is any additional details that the buyer needs to provide to the seller to complete the service.
 The Seller is identified by their solana wallet address.
 The Service Ad CID is identified by the hash of the entry.
 The Service ID is the unique identifier of the service within a service advertisement.
-
+The Contact Info is the contact information of the seller. This can be a twitter handle and/or a libp2p peer id.
 
 All possible services:
 
@@ -42,7 +43,7 @@ Return a JSON object containing all of the services that match what the user is 
 For example:
 {
     "success": true,
-    "result": "Here are the services that match your query:\n\nService Name\nService Description\nService Price\nSeller: B2imQsisfrTLoXxzgQfxtVJ3vQR9bGbpmyocVu3nWGJ6\nService Ad CID: bafyreifo4inpuekp466muw2bmldqkg6zetiwi6psjyiwzzyz35bsmcvhrq\nService ID\n\nService Name\nService Description\nService Price\nSeller: updtkJ8HAhh3rSkBCd3p9Z1Q74yJW4rMhSbScRskDPM\nService Ad CID: bafyreifo4inpuekp46zetiwi6psjyiwzzyz35bsmcvhrq6muw2bmldqkg6\nService ID"
+    "result": "Here are the services that match your query:\n\nService Name\nService Description\nService Price\nRequired Info\nSeller: B2imQsisfrTLoXxzgQfxtVJ3vQR9bGbpmyocVu3nWGJ6\nService Ad CID: bafyreifo4inpuekp466muw2bmldqkg6zetiwi6psjyiwzzyz35bsmcvhrq\nService ID\nContact Info\n\nService Name\nService Description\nService Price\nRequired Info\nSeller: updtkJ8HAhh3rSkBCd3p9Z1Q74yJW4rMhSbScRskDPM\nService Ad CID: bafyreifo4inpuekp46zetiwi6psjyiwzzyz35bsmcvhrq6muw2bmldqkg6\nService ID\nContact Info"
 }
 
 If no matching services were found, then set the "success" field to false and set the result to a string informing the user that no matching services were found, and ask them to try rewording their search. Be natural and polite.
@@ -50,6 +51,43 @@ For example, if there were no matching services, then return:
 {
     "success": false,
     "result": "A natural message informing the user that no matching services were found, and to try rewording their search."
+}
+
+Only return a JSON mardown block.
+`;
+
+const formatResponseForTwitterTemplate = `
+# About {{agentName}}
+{{bio}}
+{{lore}}
+
+# Task:
+Prepare a response for Twitter.
+It needs to be 280 characters or less.
+
+You previously gave me a list of services that are available on the PayAI marketplace.
+
+Here is the list of services:
+
+{{matchingServices}}
+
+I need you to choose only one service from the list, that best matches the user's query.
+
+Here is the user's query:
+
+{{searchQuery}}
+
+You should prefer services that have contact information that includes a Twitter handle.
+
+I want you to prepare your response so that it only includes
+ - the seller's Twitter handle
+ - the cost of the service
+ - the ipfs link to the service ad including the CID
+
+For example:
+{
+    "success": true,
+    "result": "I found a seller that offers this service! The seller is @tickertaco_ and the cost is 1 SOL. Here is the link to the service ad: https://ipfs.io/ipfs/bafyreifo4inpuekp46zetiwi6psjyiwzzyz35bsmcvhrq6muw2bmldqkg6"
 }
 
 Only return a JSON mardown block.
@@ -122,6 +160,40 @@ const browseAgents: Action = {
                 return false;
             }
 
+            // if the source of the message is twitter, then format the response for twitter
+            if (callback && message.content.source === "twitter") {
+                state.matchingServices = matchingServices.result;
+                const formatResponseForTwitterContext = composeContext({
+                    state,
+                    template: formatResponseForTwitterTemplate,
+                });
+
+                const formatResponseForTwitterContent = await generateText({
+                    runtime,
+                    context: formatResponseForTwitterContext,
+                    modelClass: ModelClass.LARGE,
+                });
+
+                const responseToUser = JSON.parse(cleanJsonResponse(formatResponseForTwitterContent));
+                elizaLogger.info("response to user:", responseToUser);
+
+                // create new memory of the message to the user
+                const newMemory: Memory = {
+                    userId: message.agentId,
+                    agentId: message.agentId,
+                    roomId: message.roomId,
+                    content: {
+                        text: responseToUser.result,
+                        action: "BROWSE_PAYAI_AGENTS",
+                        source: message.content.source,
+                    },
+                    embedding: getEmbeddingZeroVector()
+                };
+                await callback(newMemory.content);
+                await runtime.messageManager.createMemory(newMemory);
+                return true;
+            }
+
             // communicate success to the user
             const responseToUser = matchingServices.result;
             if (callback) {
@@ -138,21 +210,16 @@ const browseAgents: Action = {
                     },
                     embedding: getEmbeddingZeroVector()
                 };
-                await runtime.messageManager.createMemory(newMemory);
 
                 // send message to the user
-                callback(newMemory.content);
+                await callback(newMemory.content);
+                await runtime.messageManager.createMemory(newMemory);
             }
 
             return true;
         } catch (error) {
             console.error('Error in BROWSE_PAYAI_AGENTS handler:', error);
-            if (callback) {
-                callback({
-                    text: "Error processing BROWSE_PAYAI_AGENTS request.",
-                    content: { error: "Error processing BROWSE_PAYAI_AGENTS request." },
-                });
-            }
+            
             return false;
         }
     },

@@ -15,7 +15,7 @@ export interface JobDetails {
         client: string;
         roomId: string;
         handle: string;
-        conversationId?: string;
+        conversationId?: string;    // TODO: rename this to postId
     };
     elizaMessage: Memory;
     status: "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "FAILED" | "DELIVERED";
@@ -23,5 +23,4 @@ export interface JobDetails {
         message: string;
         url: string;
     };
-    deliveredWorkUrl?: string;
 }

@@ -6,7 +6,6 @@ import { noise } from '@chainsafe/libp2p-noise'
 import { yamux } from '@chainsafe/libp2p-yamux'
 import { gossipsub } from '@chainsafe/libp2p-gossipsub'
 import { Libp2pOptions } from 'libp2p'
-import { dataDir } from '../datadir'
 import bootstrapConfig from './bootstrap.json'
 
 
@@ -14,10 +13,6 @@ import bootstrapConfig from './bootstrap.json'
  * A basic Libp2p configuration for Node.js nodes.
  */
 const libp2pOptions: Libp2pOptions = {
-  peerStore: {
-    persistence: true,
-    threshold: 5
-  },
   peerDiscovery: [
     bootstrap({
       list: bootstrapConfig.addresses

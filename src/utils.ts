@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import { privateKeyFromRaw, generateKeyPair } from '@libp2p/crypto/keys';
 import bs58 from 'bs58';
 import {
     signBytes,
@@ -9,6 +10,8 @@ import {
 import { CID } from 'multiformats/cid';
 import { base58btc } from 'multiformats/bases/base58';
 import { IAgentRuntime } from '@elizaos/core';
+import fs from 'fs';
+import path from 'path';
 
 /**
  * Derives the Solana Keypair from a private key.
@@ -57,6 +60,30 @@ export async function getCryptoKeyFromBase58PublicKey(base58EncodedPublicKey: st
 export async function getBase58PublicKeyFromCryptoKey(publicKey: CryptoKey): Promise<string> {
     const publicKeyBytes = await crypto.subtle.exportKey('raw', publicKey);
     return bs58.encode(new Uint8Array(publicKeyBytes));
+}
+
+
+export async function getOrCreateLibp2pKeypair(keypairPath: string): Promise<any> {
+    let keypair;
+    if (fs.existsSync(keypairPath)) {
+        // load keypair from disk
+        keypair = JSON.parse(fs.readFileSync(keypairPath, 'utf8'));
+        keypair = await privateKeyFromRaw(Uint8Array.from(Object.values(keypair.raw)));
+        console.log("Loaded existing keypair for libp2p.\n");
+    } else {
+        // generate new keypair
+        keypair = await generateKeyPair('Ed25519');
+        console.log("Generated new keypair for libp2p.\n");
+
+        // write keypair to disk, creating the directory if it doesn't exist
+        const dir = path.dirname(keypairPath);
+        if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+        }
+        fs.writeFileSync(keypairPath, JSON.stringify(keypair));
+    }
+
+    return keypair;
 }
 
 export function prepareMessageForHashing(message: object): string {
@@ -167,7 +194,7 @@ export async function prepareBuyOffer(offerDetails: any, runtime: IAgentRuntime)
  * @param runtime - The runtime context for the client.
  * @returns The service ad that will be published to IPFS.
  */
-export async function prepareServiceAd(services: any, runtime: IAgentRuntime): Promise<any> {
+export async function prepareServiceAd(services: any, runtime: IAgentRuntime, contactInfo: any): Promise<any> {
     try {
         // get the user's solana private key from the runtime settings
         const userDefinedPrivateKey = runtime.getSetting('SOLANA_PRIVATE_KEY')
@@ -182,7 +209,8 @@ export async function prepareServiceAd(services: any, runtime: IAgentRuntime): P
                     ...service
                 };
             }),
-            wallet: base58PublicKey
+            wallet: base58PublicKey,
+            contactInfo: contactInfo
         };
 
         const signature = await hashAndSign(message, solanaKeypair.privateKey);
@@ -313,4 +341,69 @@ export async function getTwitterClientFromRuntime(runtime: IAgentRuntime): Promi
         return (client?.constructor?.name === "TwitterManager");
     });
     return twitterClient;
+}
+
+/**
+ * Get the full link from a short url
+ * @param shortUrl - The short url to get the full link from
+ * @returns The full link
+ */
+export async function getFullUrl(shortUrl: string) {
+    const response = await fetch(shortUrl);
+    return response.url;
+}
+
+/*
+ * Get the CID from an ipfs url
+ * @param shortUrl - The short url to get the CID from
+ * @returns The CID
+ */
+export async function getCIDFromShortUrl(shortUrl: string) {
+    // get the full url from the short url
+    const url = await getFullUrl(shortUrl);
+    
+    // parse the ipfs cid from the full url
+    // e.g. https://ipfs.io/ipfs/CID
+    const cid = await getCIDFromIpfsUrl(url);
+
+    return cid;
+}
+
+/**
+ * Get the transaction signature from a short url
+ * @param shortUrl - The short url to get the transaction signature from
+ * @returns The transaction signature
+ */
+export async function getTxFromShortUrl(shortUrl: string) {
+    // get the full url from the short url
+    const url = await getFullUrl(shortUrl);
+
+    // parse the transaction signature from the full solscan url
+    // e.g. https://solscan.io/tx/2222222222222222222222222222222222222222222222222222222222222222
+    const tx = await getTxFromSolscanUrl(url);
+    return tx;
+}
+
+/**
+ * Get the CID from an ipfs url
+ * @param ipfsUrl - The ipfs url to get the CID from
+ * @returns The CID
+ */
+export async function getCIDFromIpfsUrl(ipfsUrl: string) {
+    // parse the ipfs cid from the full url
+    // e.g. https://ipfs.io/ipfs/CID
+    const cid = ipfsUrl.split('/ipfs/')[1];
+    return cid;
+}
+
+/**
+ * Get the transaction signature from a solscan url
+ * @param url - The solscan url to get the transaction signature from
+ * @returns The transaction signature
+ */
+export async function getTxFromSolscanUrl(url: string) {
+    // parse the transaction signature from the full solscan url
+    // e.g. https://solscan.io/tx/2222222222222222222222222222222222222222222222222222222222222222
+    const tx = url.split('/tx/')[1];
+    return tx;
 }

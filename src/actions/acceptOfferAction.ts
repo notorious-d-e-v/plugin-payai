@@ -12,7 +12,7 @@ import {
     getEmbeddingZeroVector,
 } from '@elizaos/core';
 import { payAIClient } from '../clients/client.ts';
-import { getCIDFromOrbitDbHash, prepareAgreement, queryOrbitDbReturningCompleteEntries, verifyMessage } from '../utils';
+import { getCIDFromOrbitDbHash, prepareAgreement, verifyMessage, getCIDFromShortUrl } from '../utils.ts';
 
 interface AgreementDetails {
     buyOfferCID: string;
@@ -34,8 +34,17 @@ For example:
     }
 }
 
-If the buyer did not provide the CID of the Buy Offer, then set the "success" field to false and set the result to a string asking the user to provide the missing information.
-For example, if you could not find the CID of the Buy Offer, then return:
+If you found a short url like https://t.co/9dj1CQ98yG instead of a CID, then you can set that as the "buyOfferCID" field.
+For example:
+{
+    "success": true,
+    "result": {
+        "buyOfferCID": "https://t.co/9dj1CQ98yG"
+    }
+}
+
+If the buyer did not provide the CID of the Buy Offer nor a short url, then set the "success" field to false and set the result to a string asking the user to provide the missing information.
+For example:
 {
     "success": false,
     "result": "Please provide the CID of the Buy Offer."
@@ -44,10 +53,39 @@ For example, if you could not find the CID of the Buy Offer, then return:
 Only return a JSON markdown block.
 `;
 
+const successfulResponseToUserTemplate = `
+# About {{agentName}}
+{{bio}}
+{{lore}}
+
+# Task:
+Based on the conversation below, respond to the buyer letting them know that you have accepted their offer.
+Ask the buyer to fund the contract.
+You should use your own words and style.
+Don't tag the buyer in your response.
+The response should be 260 characters or less.
+
+
+Conversation:
+{{recentMessages}}
+
+Make sure to include the link of the agreement that you created so that the buyer can review it.
+The link is https://ipfs.io/ipfs/{{agreementCID}}
+
+
+For example:
+{
+    "success": true,
+    "result": "A natural message informing the user that the offer has been accepted, asking them to fund the contract, and including the ipfs link to the agreement."
+}
+
+Return JSON markdown only.
+`
+
 const acceptOfferAction: Action = {
     name: "ACCEPT_OFFER",
     similes: ["AGREE_TO_OFFER", "ACCEPT_PROPOSAL", "ACCEPT_TERMS", "ACCEPT_BUY_OFFER"],
-    description: "This action allows a seller to accept an offer from a buyer on the PayAI marketplace.",
+    description: "This action allows a seller to check a buy offer from a buyer and accept it on the PayAI marketplace.",
     suppressInitialMessage: true,
     validate: async (runtime: IAgentRuntime, message: Memory) => {
         return true;
@@ -75,14 +113,14 @@ const acceptOfferAction: Action = {
             const extractedDetailsText = await generateText({
                 runtime,
                 context: acceptOfferContext,
-                modelClass: ModelClass.SMALL,
+                modelClass: ModelClass.LARGE,
             });
 
             elizaLogger.debug("extracted the following Buy Offer CID from the conversation:", extractedDetailsText);
             const extractedDetails = JSON.parse(cleanJsonResponse(extractedDetailsText));
 
             // Validate offer details
-            if (extractedDetails.success === false || extractedDetails.success === "false") {
+            if (extractedDetails.success === false) {
                 elizaLogger.info("Need more information from the user to accept the offer.");
                 if (callback) {
                     callback({
@@ -94,8 +132,14 @@ const acceptOfferAction: Action = {
                 return false;
             }
 
+            // if the url was shortened by a client like twitter, then follow the short url to get the CID
+            if (extractedDetails.result.buyOfferCID.includes("t.co")) {
+                const cid = await getCIDFromShortUrl(extractedDetails.result.buyOfferCID);
+                extractedDetails.result.buyOfferCID = cid;
+            }
+
             // analyze the buy offer to determine if it is valid
-            const { isValid, reason } = await isValidBuyOffer(extractedDetails.result.buyOfferCID, runtime);
+            const { isValid, reason } = await isValidBuyOffer(extractedDetails.result.buyOfferCID);
             if (!isValid) {
                 elizaLogger.info(reason);
                 if (callback) {
@@ -123,8 +167,20 @@ const acceptOfferAction: Action = {
             const CID = getCIDFromOrbitDbHash(result);
             elizaLogger.info("Published Agreement to IPFS: ", CID);
 
-            // TODO Notify the buyer agent of the agreement using lib2p2 or other communication channels in the future
-            let responseToUser = `I accepted the offer and signed an agreement. The Agreement's IPFS CID is ${CID}`;
+            state.agreementCID = CID;
+            const successfulResponseToUserContext = composeContext({
+                state,
+                template: successfulResponseToUserTemplate,
+            });
+
+            const successfulResponseToUserText = await generateText({
+                runtime,
+                context: successfulResponseToUserContext,
+                modelClass: ModelClass.LARGE,
+            });
+
+            const successfulResponseToUser = JSON.parse(cleanJsonResponse(successfulResponseToUserText));
+            elizaLogger.debug("Successful response to user:", successfulResponseToUser.result);
 
             if (callback) {
                 // create new memory of the message to the user
@@ -133,17 +189,17 @@ const acceptOfferAction: Action = {
                     agentId: message.agentId,
                     roomId: message.roomId,
                     content: {
-                        text: `@${state.senderName} ${responseToUser}`,
+                        text: `@${state.senderName} ${successfulResponseToUser.result}`,
                         action: "ACCEPT_OFFER",
                         source: message.content.source,
                         agreement: agreementDetails,
                     },
                     embedding: getEmbeddingZeroVector()
                 };
-                await runtime.messageManager.createMemory(newMemory);
-
+                
                 // send message to the user
-                callback(newMemory.content);
+                await callback(newMemory.content);
+                await runtime.messageManager.createMemory(newMemory);
             }
 
             return true;
@@ -159,7 +215,7 @@ const acceptOfferAction: Action = {
             {
                 user: "{{user1}}",
                 content: {
-                    text: "I sent you a buy offer with CID bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi",
+                    text: "Hey I've just made an offer for your service! You can see it here: https://ipfs.io/ipfs/bafyreie5jopsd22lrb5d46qgmytjobxs72lqopdkrayf6e3mvblwufld7m. Looking forward to working with you!",
                 },
             },
             {
@@ -175,45 +231,13 @@ const acceptOfferAction: Action = {
             {
                 user: "{{user1}}",
                 content: {
-                    text: "I sent you a buy offer with CID bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi",
+                    text: "Hey I've just made an offer for your service! You can see it here: https://ipfs.io/ipfs/bafyreie5jopsd22lrb5d46qgmytjobxs72lqopdkrayf6e3mvblwufld7m. Looking forward to working with you!",
                 },
             },
             {
                 user: "{{user2}}",
                 content: {
                     text: "Buy Offer signature is invalid.",
-                    action: "ACCEPT_OFFER",
-                },
-            },
-        ],
-        // Example where the user provides a Buy Offer that references a non-existent Service Ad
-        [
-            {
-                user: "{{user1}}",
-                content: {
-                    text: "I sent you a buy offer with CID bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi",
-                },
-            },
-            {
-                user: "{{user2}}",
-                content: {
-                    text: "ServiceAd referenced by Buy Offer does not exist",
-                    action: "ACCEPT_OFFER",
-                },
-            },
-        ],
-        // Example where the user provides a Buy Offer that references a Service Ad that does not match the seller's most recent Service Ad
-        [
-            {
-                user: "{{user1}}",
-                content: {
-                    text: "I sent you a buy offer with CID bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi",
-                },
-            },
-            {
-                user: "{{user2}}",
-                content: {
-                    text: "ServiceAd does not match the seller's most recent service Ad. Seller's most recent service ad can be found at bafybeibml5uieyxa5tufngvg7fgwbkwvlsuntwbxgtskoqynbt7wlchmfm",
                     action: "ACCEPT_OFFER",
                 },
             },
@@ -226,7 +250,7 @@ const acceptOfferAction: Action = {
  * This function verifies the Buy Offer and the Service Ad to ensure that the Buy Offer is valid in the eyes of the Seller Agent.
  * The function checks the signature of the Buy Offer, the existence of the Service Ad, and that the Service Ad matches the Seller's local Service Ad.
  */
-async function isValidBuyOffer(buyOfferCID: string, runtime: IAgentRuntime) {
+async function isValidBuyOffer(buyOfferCID: string) {
     try {
         // get the buy offer from the buyOffersDB
         const buyOffer = (await payAIClient.getEntryFromCID(buyOfferCID, payAIClient.buyOffersDB)).payload.value;

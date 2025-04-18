@@ -15,12 +15,7 @@ import { Account, Address } from '@solana/web3.js';
 import { Contract } from '../generated/accounts/contract.ts';
 import { payAIClient } from '../clients/client.ts';
 import { paymentClient } from '../payment.ts';
-import { verifyMessage, getBase58PublicKey, getTwitterClientFromRuntime } from '../utils.ts';
-import { JobDetails } from '../types.ts';
-
-interface ContractDetails {
-    transactionSignature: string;
-}
+import { verifyMessage, getBase58PublicKey, getTwitterClientFromRuntime, getFullUrl, getTxFromShortUrl, getTxFromSolscanUrl } from '../utils.ts';
 
 const extractDeliveredWorkTemplate = `
 Analyze the following conversation to extract a link of the work that the seller has delivered.
@@ -47,8 +42,8 @@ For example, if you could not find the delivery link, then return:
 Only return a JSON markdown block.
 `;
 
-const extractTransactionSignatureTemplate = `
-Analyze the following conversation to extract the transaction signature of the contract that funded the work.
+const extractTransactionLinkTemplate = `
+Analyze the following conversation to extract the link of the transaction that funded the contract.
 
 {{recentMessages}}
 
@@ -57,15 +52,15 @@ For example:
 {
     "success": true,
     "result": {
-        "transactionSignature": "transaction signature of the contract that funded the work"
+        "transactionLink": "link to the transaction that funded the contract"
     }
 }
 
-If you cannot find the transaction signature in the conversation, then set the "success" field to false and set the result to a string asking the user to provide the missing information.
-For example, if you could not find the transaction signature, then return:
+If you cannot find the transaction link in the conversation, then set the "success" field to false and set the result to a string asking the user to provide the missing information.
+For example, if you could not find the transaction link, then return:
 {
     "success": false,
-    "result": "Please provide the transaction signature of the contract execution that funded the work."
+    "result": "A natural message asking the user to provide the transaction link of the contract execution that funded the work."
 }
 
 Only return a JSON markdown block.
@@ -105,6 +100,27 @@ For example, if the work is not satisfactory, then return:
 Only return a JSON markdown block.
 `;
 
+const successfulResponseToUserTemplate = `
+# About {{agentName}}
+{{bio}}
+{{lore}}
+
+# Task:
+Based on the conversation below, respond to the seller thanking them for delivering the work, and letting them know that you have reviewed the work and that everything looks good.
+Let them know that you released the payment from escrow to their wallet in transaction https://solscan.io/tx/{{tx}}.
+You should use your own words and style.
+The response should be 260 characters or less.
+Conversation:
+{{recentMessages}}
+
+For example:
+{
+    "success": true,
+    "result": "A natural message thanking the seller for delivering the work, and letting them know that you have reviewed the work and that everything looks good. Letting them know that you released the payment from escrow to their wallet in transaction https://solscan.io/tx/{{tx}}."
+}
+
+Return JSON markdown only.
+`;
 
 const reviewWorkAction: Action = {
     name: "REVIEW_WORK",
@@ -134,25 +150,25 @@ const reviewWorkAction: Action = {
             console.dir(state, { depth: null });
 
             // read the recent messages to get the transaction signature that funded the contract
-            const transactionSignatureContext = composeContext({
+            const transactionLinkContext = composeContext({
                 state,
-                template: extractTransactionSignatureTemplate,
+                template: extractTransactionLinkTemplate,
             });
 
-            const extractedSignatureText = await generateText({
+            const extractedTransactionLinkText = await generateText({
                 runtime,
-                context: transactionSignatureContext,
-                modelClass: ModelClass.SMALL,
+                context: transactionLinkContext,
+                modelClass: ModelClass.LARGE,
             });
 
-            const extractedSignature = JSON.parse(cleanJsonResponse(extractedSignatureText));
+            const extractedTransactionLink = JSON.parse(cleanJsonResponse(extractedTransactionLinkText));
 
             // validate parsing the transaction signature
-            if (extractedSignature.success === false) {
-                elizaLogger.info("Need more information from the user to review the work.", extractedSignature.result);
+            if (extractedTransactionLink.success === false) {
+                elizaLogger.info("Need more information from the user to review the work.", extractedTransactionLink.result);
                 if (callback) {
                     callback({
-                        text: `@${state.senderName} ${extractedSignature.result}`,
+                        text: `@${state.senderName} ${extractedTransactionLink.result}`,
                         action: "REVIEW_WORK",
                         source: message.content.source,
                     });
@@ -160,13 +176,22 @@ const reviewWorkAction: Action = {
                 return false;
             }
 
-            console.log("EXTRACTED SIGNATURE: ");
-            console.dir(extractedSignature, { depth: null });
+            // if the url was shortened by a client like twitter, then follow the short url to get the CID
+            if (extractedTransactionLink.result.transactionLink.includes("t.co")) {
+                const tx = await getTxFromShortUrl(extractedTransactionLink.result.transactionLink);
+                extractedTransactionLink.result.transactionLink = tx;
+            }
+
+            // if the url is solscan.io, then get the tx signature from the url
+            if (extractedTransactionLink.result.transactionLink.includes("solscan.io")) {
+                const tx = await getTxFromSolscanUrl(extractedTransactionLink.result.transactionLink);
+                extractedTransactionLink.result.transactionLink = tx;
+            }
 
             // validate the contract and all related documents
             const validationResult = await validateContract(
                 runtime,
-                extractedSignature.result.transactionSignature,
+                extractedTransactionLink.result.transactionLink,
                 callback,
                 message,
             );
@@ -184,7 +209,7 @@ const reviewWorkAction: Action = {
             const extractedDeliveredWorkText = await generateText({
                 runtime,
                 context: extractDeliveredWorkContext,
-                modelClass: ModelClass.SMALL,
+                modelClass: ModelClass.LARGE,
             });
 
             const extractedDetails = JSON.parse(cleanJsonResponse(extractedDeliveredWorkText));
@@ -201,49 +226,35 @@ const reviewWorkAction: Action = {
 
             // TODO: follow the link and review the work
             // if the link is a tweet with a link in it, then parse the link from the tweet
-            console.log("EXTRACTED DETAILS: ");
-            console.dir(extractedDetails, { depth: null });
             const shortUrl = extractedDetails.result.deliveredWorkLink;
-            console.log("SHORT URL: ", shortUrl);
 
             // follow the twitter short link to get the full link
-            const fullUrl = await getFullLink(shortUrl);
-            console.log("FULL URL: ", fullUrl);
+            const fullUrl = await getFullUrl(shortUrl);
 
             // now use the twitter client to get the full tweet thread
             // and compile the entire text of the tweet thread
             const twitterClient = await getTwitterClientFromRuntime(runtime);
             const { conversationId, username } = getConversationIdAndUsername(fullUrl);
-            console.log("CONVERSATION ID: ", conversationId);
-            console.log("USERNAME: ", username);
             const rootTweet = await twitterClient.client.getTweet(conversationId);
-            console.log("ROOT TWEET: ");
-            console.dir(rootTweet, { depth: null });
             const query = `conversation_id:${conversationId} from:${username}`;
             const threadTweets = await twitterClient.client.fetchSearchTweets(query, 100);
-            console.log("THREAD TWEETS: ");
-            console.dir(threadTweets, { depth: null });
 
             // sort the tweets in order by the tweet id
             let sortedTweets = [rootTweet];
             // sort the threadtweets and append them to the sortedTweets
             threadTweets.tweets.sort((a, b) => a.id - b.id);
             sortedTweets.push(...threadTweets.tweets); 
-            console.log("SORTED TWEETS: ");
-            console.dir(sortedTweets, { depth: null });
 
             // compile the entire text of the tweet thread
             let tweetText = "";
             for (const tweet of sortedTweets) {
                 tweetText += tweet.text + "\n\n";
             }
-            console.log("FULL TWEET TEXT: ", tweetText);
 
             const desiredServiceID = parseInt(validationResult.buyOffer.message.desiredServiceID);
 
             // loop through the services in serviceAd.message.services and find the one with the matching id
             const serviceAdDescription = validationResult.serviceAd.message.services.find((service: any) => service.id === desiredServiceID)?.description;
-            console.log("SERVICE AD DESCRIPTION: ", serviceAdDescription);
 
             // to review the work, send the delivered work along with the description of the service
             // in the service advertisement and the request for the work in the buy offer
@@ -262,8 +273,6 @@ const reviewWorkAction: Action = {
             });
 
             const reviewWorkResult = JSON.parse(cleanJsonResponse(reviewWorkText));
-            console.log("REVIEW WORK RESULT: ");
-            console.dir(reviewWorkResult, { depth: null });
 
             if (reviewWorkResult.success === false) {
                 elizaLogger.info("The work is not satisfactory. ", reviewWorkResult.result);
@@ -282,16 +291,38 @@ const reviewWorkAction: Action = {
             const seller = validationResult.contractAccount.data.seller.toString();
 
             const tx = await paymentClient.releasePayment(contractAccountAddress, seller);
-            console.log("TX: ", tx);
 
-            let responseToUser = `@${state.senderName} The work has been reviewed and found to be satisfactory. The funds have been released to you in transaction https://solscan.io/tx/${tx}.`;
+            state.tx = tx;
+            const successfulResponseToUserContext = composeContext({
+                state,
+                template: successfulResponseToUserTemplate,
+            });
+
+            const successfulResponseToUserText = await generateText({
+                runtime,
+                context: successfulResponseToUserContext,
+                modelClass: ModelClass.LARGE,
+            });
+
+            const successfulResponseToUser = JSON.parse(cleanJsonResponse(successfulResponseToUserText));
+            elizaLogger.debug("Successful response to user:", successfulResponseToUser.result);
 
             if (callback) {
-                callback({
-                    text: responseToUser,
-                    action: "REVIEW_WORK",
-                    source: message.content.source,
-                });
+                // create new memory of the message to the user
+                const newMemory: Memory = {
+                    userId: message.userId,
+                    agentId: message.agentId,
+                    roomId: message.roomId,
+                    content: {
+                        text: `@${state.senderName} ${successfulResponseToUser.result}`,
+                        action: "REVIEW_WORK",
+                        source: message.content.source,
+                    },
+                    embedding: getEmbeddingZeroVector()
+                };
+
+                await callback(newMemory.content);
+                await runtime.messageManager.createMemory(newMemory);
             }
 
             return true;
@@ -327,10 +358,10 @@ const reviewWorkAction: Action = {
             {
                 user: "{{user2}}",
                 content: {
-                    text: "Thanks! I just reviewed the work and everything looks good. I released the payment to you in transaction 4vxNhiUKsUpYkJg42WBVA7wLacZwu2MT5ur8ETfpfrZHQuYFTdbu8PHSmAg1ft283LykP3RyLMEFWktzLCvzAjX3. Feel free to check it out.",
+                    text: "Thanks! I just reviewed the work and everything looks good. I released the payment to you in transaction https://solscan.io/tx/4vxNhiUKsUpYkJg42WBVA7wLacZwu2MT5ur8ETfpfrZHQuYFTdbu8PHSmAg1ft283LykP3RyLMEFWktzLCvzAjX3. Feel free to check it out.",
                 },
             },
-        ],        
+        ],
         [
             {
                 user: "{{user1}}",
@@ -483,12 +514,6 @@ async function validateContract(
         buyOffer,
         serviceAd,
     };
-}
-
-async function getFullLink(shortUrl: string) {
-    const response = await fetch(shortUrl);
-    console.dir(response, { depth: 3 });
-    return response.url;
 }
 
 function getConversationIdAndUsername(fullUrl: string) {
