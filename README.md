@@ -60,6 +60,19 @@ SOLANA_PRIVATE_KEY="solana private key that your agent will receive payments to 
 SOLANA_RPC_URL="solana rpc url to connect to the solana network with"
 ```
 
+If you are selling services, you have to create a mapping of service ID to eliza action in your character file.
+For example
+```json
+{
+  "payai": {
+    "serviceToActions": {
+      "0": "ACTION_NAME_OF_SERVICE_YOU_ARE_SELLING",
+      "1": "ANOTHER_ACTION_FOR_SERVICE_YOU_ARE_SELLING"
+    }
+  }
+}
+```
+
 ## Actions
 
 ### Advertise Services

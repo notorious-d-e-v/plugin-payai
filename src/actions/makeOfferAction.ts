@@ -22,6 +22,7 @@ interface OfferDetails {
     serviceAdCID: string;
     desiredServiceID: string;
     desiredUnitAmount: string;
+    infoFromBuyer: string;
 }
 
 const extractOfferDetailsTemplate = `
@@ -31,9 +32,9 @@ Offer Details have this schema when successful:
     "success": true,
     "result": {
         "serviceAdCID": "hash of the seller's services",
-        "wallet": "Solana public key of the seller",
-        "desiredServiceID": "ID of the service the buyer wants to purchase",
-        "desiredUnitAmount": "Amount of units the buyer wants to purchase"
+        "desiredServiceID": "ID of the service the buyer wants to purchase or 0 if not provided",
+        "desiredUnitAmount": "Amount of units the buyer wants to purchase or 1 if not provided",
+        "infoFromBuyer": "Any additional details that the buyer needs to provide to the seller to complete the service or empty string if not provided"
 }
 
 Offer Details have this schema when unsuccessful:
@@ -46,34 +47,59 @@ Conversation:
 {{recentMessages}}
 
 
-Return a JSON object containing only the fields where information was clearly found.
+Return a JSON object containing the following fields.
 For example:
 {
     "success": true,
     "result": {
         "serviceAdCID": "hash of the seller's services",
-        "wallet": "Solana public key of the seller",
-        "desiredServiceID": "ID of the service the buyer wants to purchase",
-        "desiredUnitAmount": "Amount of units the buyer wants to purchase"
+        "desiredServiceID": "ID of the service the buyer wants to purchase or 0 if not provided",
+        "desiredUnitAmount": "Amount of units the buyer wants to purchase or 1 if not provided",
+        "infoFromBuyer": "Any additional details that the buyer needs to provide to the seller to complete the service or empty string if not provided"
     }
 }
 
-If the buyer provided the seller's identity or wallet in the conversation, then set the wallet field to equal the seller's identity or wallet.
-If the buyer provided the service ID or amount of units in the conversation, then set the desiredServiceID or desiredUnitAmount fields to equal the service ID or amount of units.
-If the buyer provided the seller's service ad CID in the conversation, then set the serviceAdCID field to equal the seller's service ad CID.
+If the buyer provided the service ID then set the desiredServiceID to the service ID. Otherwise set the desiredServiceID to "0" if not provided.
+If the buyer provided the amount of units then set the desiredUnitAmount to the amount of units. Otherwise set the desiredUnitAmount to "1" if not provided.
+If the buyer provided the seller's service ad CID in the conversation, then set the serviceAdCID to the CID.
+If the buyer provided the seller with any additional details in the conversation, then set the infoFromBuyer to the additional details.
 
-If not all information was provided, or the information was unclear, then set the "success" field to false and set the result to a string asking the user to provide the missing information.
-For example, if you could only find the seller's wallet or identity, then return:
+If not all information could be determined from the conversation and from your instructions, then set the "success" field to false and set the result to a string asking the user to provide the missing information.
+For example:
 {
     "success": false,
-    "result": "Please provide the service ID, and the amount of units you want to purchase."
+    "result": "Natural language asking for the missing information."
 }
-
-Make sure you recognize when a user is asking to purchase a new service.
-If you see in the message history that you recently created a purchase order for a user, and now they are asking for a new service, then you should forget the previous order that they created and help them create a new purchase order for a new service.
 
 Only return a JSON markdown block.
 `;
+
+const successfulResponseToUserTemplate = `
+# About {{agentName}}
+{{bio}}
+{{lore}}
+
+# Task:
+Based on the conversation below, respond to the seller letting them know that you have made an offer for their service, and ask them to accept it and sign an agreement.
+You should use your own words and style.
+The response should be 260 characters or less.
+
+Conversation:
+{{recentMessages}}
+
+
+Make sure to include the @username of the seller and the link of the buy offer that you created so that the seller can check it out.
+The link is https://ipfs.io/ipfs/{{buyOfferCID}}
+
+
+For example:
+{
+    "success": true,
+    "result": "A natural message tagging the seller and informing them that the offer has been made, and the ipfs link to the buy offer."
+}
+
+Return JSON markdown only.
+`
 
 const makeOfferAction: Action = {
     name: "MAKE_OFFER",
@@ -106,7 +132,7 @@ const makeOfferAction: Action = {
             const extractedDetailsText = await generateText({
                 runtime,
                 context: makeOfferContext,
-                modelClass: ModelClass.SMALL,
+                modelClass: ModelClass.LARGE,
             });
 
             elizaLogger.debug("extractedDetailsText:", extractedDetailsText);
@@ -114,11 +140,11 @@ const makeOfferAction: Action = {
             elizaLogger.debug("extractedDetails:", extractedDetails);
 
             // Validate offer details
-            if (extractedDetails.success === false || extractedDetails.success === "false") {
+            if (extractedDetails.success === false) {
                 elizaLogger.info("Need more information from the user to make an offer.");
                 if (callback) {
                     callback({
-                        text: extractedDetails.result,
+                        text: `@${state.senderName} ${extractedDetails.result}`,
                         action: "MAKE_OFFER",
                         source: message.content.source,
                     });
@@ -129,8 +155,9 @@ const makeOfferAction: Action = {
             // create an offer
             const offerDetails: OfferDetails = {
                 serviceAdCID: extractedDetails.result.serviceAdCID,
-                desiredServiceID: extractedDetails.result.desiredServiceID,
-                desiredUnitAmount: extractedDetails.result.desiredUnitAmount
+                desiredServiceID: extractedDetails.result.desiredServiceID || "0",
+                desiredUnitAmount: extractedDetails.result.desiredUnitAmount || "1",
+                infoFromBuyer: extractedDetails.result.infoFromBuyer
             };
 
             // prepare the offer message
@@ -144,8 +171,20 @@ const makeOfferAction: Action = {
 
             // TODO Notify the seller agent of the offer using lib2p2 or other communication channels in the future
 
-            let responseToUser = `Successfully made an offer for ${offerDetails.desiredUnitAmount} units of service ID ${offerDetails.desiredServiceID} from seller ${extractedDetails.result.wallet}.`;
-            responseToUser += `\nYour Buy Offer's IPFS CID is ${CID}`;
+            state.buyOfferCID = CID;
+            const successfulResponseToUserContext = composeContext({
+                state,
+                template: successfulResponseToUserTemplate,
+            });
+
+            const successfulResponseToUserText = await generateText({
+                runtime,
+                context: successfulResponseToUserContext,
+                modelClass: ModelClass.LARGE,
+            });
+
+            const successfulResponseToUser = JSON.parse(cleanJsonResponse(successfulResponseToUserText));
+            elizaLogger.debug("Successful response to user:", successfulResponseToUser.result);
 
             if (callback) {
                 // create new memory of the message to the user
@@ -154,17 +193,16 @@ const makeOfferAction: Action = {
                     agentId: message.agentId,
                     roomId: message.roomId,
                     content: {
-                        text: responseToUser,
+                        text: `${successfulResponseToUser.result}`,
                         action: "MAKE_OFFER",
                         source: message.content.source,
-                        buyOffer: offerDetails,
                     },
                     embedding: getEmbeddingZeroVector()
                 };
-                await runtime.messageManager.createMemory(newMemory);
 
                 // send message to the user
-                callback(newMemory.content);
+                await callback(newMemory.content);
+                await runtime.messageManager.createMemory(newMemory);
             }
 
             return true;
@@ -172,13 +210,6 @@ const makeOfferAction: Action = {
         } catch (error) {
             elizaLogger.error('Error in MAKE_OFFER handler:', error);
             console.error(error);
-            if (callback) {
-                callback({
-                    text: "Error processing MAKE_OFFER request.",
-                    action: "MAKE_OFFER",
-                    source: message.content.source,
-                });
-            }
             return false;
         }
     },
@@ -193,7 +224,7 @@ const makeOfferAction: Action = {
             {
                 user: "{{user2}}",
                 content: {
-                    text: "Successfully made an offer for ${offerDetails.desiredUnitAmount} units of service ID ${offerDetails.desiredServiceID} from seller ${extractedDetails.result.wallet}. Your Buy Offer's IPFS CID is bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi",
+                    text: "Successfully made an offer for to the seller. Your Buy Offer's IPFS CID is bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi",
                     action: "MAKE_OFFER"
                 },
             },
@@ -202,62 +233,17 @@ const makeOfferAction: Action = {
             {
                 user: "{{user1}}",
                 content: {
-                    text: "I want to purchase 3 units of service ID 2."
+                    text: "I want to purchase service with CID."
                 },
             },
             {
                 user: "{{user2}}",
                 content: {
-                    text: "Please provide the seller's identity, the service ID, and the amount of units you want to purchase.",
+                    text: "Please provide the service ad CID",
                     action: "MAKE_OFFER"
                 },
             }
         ],
-        [
-            {
-                user: "{{user1}}",
-                content: {
-                    text: "I want to purchase service ID 1."
-                },
-            },
-            {
-                user: "{{user2}}",
-                content: {
-                    text: "Please provide the seller's identity, the service ID, and the amount of units you want to purchase.",
-                    action: "MAKE_OFFER"
-                },
-            }
-        ],
-        [
-            {
-                user: "{{user1}}",
-                content: {
-                    text: "I want to purchase seller 9ovkK7WoiSXyEJDM5cZG3or3W95bdzZLDDHhuMgSJT9U"
-                },
-            },
-            {
-                user: "{{user2}}",
-                content: {
-                    text: "Please provide the seller's identity, the service ID, and the amount of units you want to purchase.",
-                    action: "MAKE_OFFER"
-                },
-            }
-        ],
-        [
-            {
-                user: "{{user1}}",
-                content: {
-                    text: "I want to purchase 5 units of service ID 1 from seller 9ovkK7WoiSXyEJDM5cZG3or3W95bdzZLDDHhuMgSJT9U",
-                },
-            },
-            {
-                user: "{{user2}}",
-                content: {
-                    text: "Please provide the serviceAdCID of the seller's services.",
-                    action: "MAKE_OFFER"
-                },
-            },
-        ]
     ],
 };
 

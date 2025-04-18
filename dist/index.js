@@ -36,10 +36,6 @@ var bootstrap_default = {
 
 // src/config/libp2p.ts
 var libp2pOptions = {
-  peerStore: {
-    persistence: true,
-    threshold: 5
-  },
   peerDiscovery: [
     bootstrap({
       list: bootstrap_default.addresses
@@ -70,10 +66,11 @@ var cwd = process.cwd();
 var dataDir = `${cwd}/data/payai`;
 
 // src/clients/client.ts
-import fs from "fs";
+import fs2 from "fs";
 
 // src/utils.ts
 import { createHash } from "crypto";
+import { privateKeyFromRaw, generateKeyPair } from "@libp2p/crypto/keys";
 import bs58 from "bs58";
 import {
   signBytes,
@@ -82,6 +79,8 @@ import {
 } from "@solana/web3.js";
 import { CID } from "multiformats/cid";
 import { base58btc } from "multiformats/bases/base58";
+import fs from "fs";
+import path from "path";
 async function getSolanaKeypair(base58PrivateKey) {
   let secretKeyBytes = bs58.decode(base58PrivateKey);
   if (secretKeyBytes.length === 64) {
@@ -104,6 +103,23 @@ async function getCryptoKeyFromBase58PublicKey(base58EncodedPublicKey) {
 async function getBase58PublicKeyFromCryptoKey(publicKey) {
   const publicKeyBytes = await crypto.subtle.exportKey("raw", publicKey);
   return bs58.encode(new Uint8Array(publicKeyBytes));
+}
+async function getOrCreateLibp2pKeypair(keypairPath) {
+  let keypair;
+  if (fs.existsSync(keypairPath)) {
+    keypair = JSON.parse(fs.readFileSync(keypairPath, "utf8"));
+    keypair = await privateKeyFromRaw(Uint8Array.from(Object.values(keypair.raw)));
+    console.log("Loaded existing keypair for libp2p.\n");
+  } else {
+    keypair = await generateKeyPair("Ed25519");
+    console.log("Generated new keypair for libp2p.\n");
+    const dir = path.dirname(keypairPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(keypairPath, JSON.stringify(keypair));
+  }
+  return keypair;
 }
 function prepareMessageForHashing(message) {
   const sortedMessage = sortObjectByKey(message);
@@ -145,7 +161,7 @@ async function prepareBuyOffer(offerDetails, runtime) {
     throw error;
   }
 }
-async function prepareServiceAd(services, runtime) {
+async function prepareServiceAd(services, runtime, contactInfo) {
   try {
     const userDefinedPrivateKey = runtime.getSetting("SOLANA_PRIVATE_KEY");
     const solanaKeypair = await getSolanaKeypair(userDefinedPrivateKey);
@@ -157,7 +173,8 @@ async function prepareServiceAd(services, runtime) {
           ...service
         };
       }),
-      wallet: base58PublicKey
+      wallet: base58PublicKey,
+      contactInfo
     };
     const signature = await hashAndSign(message, solanaKeypair.privateKey);
     const formattedServices = {
@@ -233,6 +250,36 @@ function sortObjectByKey(message) {
     return obj;
   }, {});
   return sortedMessage;
+}
+async function getTwitterClientFromRuntime(runtime) {
+  const twitterClient = runtime.clients.find((client) => {
+    var _a;
+    if (!client) return false;
+    return ((_a = client == null ? void 0 : client.constructor) == null ? void 0 : _a.name) === "TwitterManager";
+  });
+  return twitterClient;
+}
+async function getFullUrl(shortUrl) {
+  const response = await fetch(shortUrl);
+  return response.url;
+}
+async function getCIDFromShortUrl(shortUrl) {
+  const url = await getFullUrl(shortUrl);
+  const cid = await getCIDFromIpfsUrl(url);
+  return cid;
+}
+async function getTxFromShortUrl(shortUrl) {
+  const url = await getFullUrl(shortUrl);
+  const tx = await getTxFromSolscanUrl(url);
+  return tx;
+}
+async function getCIDFromIpfsUrl(ipfsUrl) {
+  const cid = ipfsUrl.split("/ipfs/")[1];
+  return cid;
+}
+async function getTxFromSolscanUrl(url) {
+  const tx = url.split("/tx/")[1];
+  return tx;
 }
 
 // src/payment.ts
@@ -670,6 +717,122 @@ var RELEASE_PAYMENT_DISCRIMINATOR = new Uint8Array([
   183,
   233
 ]);
+function getReleasePaymentInstructionDataEncoder() {
+  return transformEncoder9(
+    getStructEncoder9([["discriminator", fixEncoderSize10(getBytesEncoder10(), 8)]]),
+    (value) => ({ ...value, discriminator: RELEASE_PAYMENT_DISCRIMINATOR })
+  );
+}
+async function getReleasePaymentInstructionAsync(input, config) {
+  const programAddress = (config == null ? void 0 : config.programAddress) ?? PAYAI_MARKETPLACE_PROGRAM_ADDRESS;
+  const originalAccounts = {
+    signer: { value: input.signer ?? null, isWritable: true },
+    contract: { value: input.contract ?? null, isWritable: true },
+    escrowVault: { value: input.escrowVault ?? null, isWritable: true },
+    seller: { value: input.seller ?? null, isWritable: true },
+    globalState: { value: input.globalState ?? null, isWritable: true },
+    platformFeeVault: {
+      value: input.platformFeeVault ?? null,
+      isWritable: true
+    },
+    systemProgram: { value: input.systemProgram ?? null, isWritable: false }
+  };
+  const accounts = originalAccounts;
+  if (!accounts.escrowVault.value) {
+    accounts.escrowVault.value = await getProgramDerivedAddress5({
+      programAddress,
+      seeds: [
+        getBytesEncoder10().encode(
+          new Uint8Array([
+            101,
+            115,
+            99,
+            114,
+            111,
+            119,
+            95,
+            118,
+            97,
+            117,
+            108,
+            116
+          ])
+        ),
+        getAddressEncoder5().encode(expectAddress(accounts.contract.value))
+      ]
+    });
+  }
+  if (!accounts.globalState.value) {
+    accounts.globalState.value = await getProgramDerivedAddress5({
+      programAddress,
+      seeds: [
+        getBytesEncoder10().encode(
+          new Uint8Array([
+            103,
+            108,
+            111,
+            98,
+            97,
+            108,
+            95,
+            115,
+            116,
+            97,
+            116,
+            101
+          ])
+        )
+      ]
+    });
+  }
+  if (!accounts.platformFeeVault.value) {
+    accounts.platformFeeVault.value = await getProgramDerivedAddress5({
+      programAddress,
+      seeds: [
+        getBytesEncoder10().encode(
+          new Uint8Array([
+            112,
+            108,
+            97,
+            116,
+            102,
+            111,
+            114,
+            109,
+            95,
+            102,
+            101,
+            101,
+            95,
+            118,
+            97,
+            117,
+            108,
+            116
+          ])
+        )
+      ]
+    });
+  }
+  if (!accounts.systemProgram.value) {
+    accounts.systemProgram.value = "11111111111111111111111111111111";
+  }
+  const getAccountMeta = getAccountMetaFactory(programAddress, "programId");
+  const instruction = {
+    accounts: [
+      getAccountMeta(accounts.signer),
+      getAccountMeta(accounts.contract),
+      getAccountMeta(accounts.escrowVault),
+      getAccountMeta(accounts.seller),
+      getAccountMeta(accounts.globalState),
+      getAccountMeta(accounts.platformFeeVault),
+      getAccountMeta(accounts.systemProgram)
+    ],
+    programAddress,
+    data: getReleasePaymentInstructionDataEncoder().encode({})
+  };
+  return instruction;
+}
 
 // src/generated/instructions/startContract.ts
 import {
@@ -1090,6 +1253,36 @@ var Payment = class {
     });
     return pda;
   };
+  /*
+   * Return the address of the escrow vault account.
+   * @returns The address of the escrow vault account.
+   */
+  getEscrowVaultAccountAddress = async () => {
+    const bytesEncoder = getBytesEncoder15();
+    const [pda] = await getProgramDerivedAddress10({
+      programAddress: PAYAI_MARKETPLACE_PROGRAM_ADDRESS,
+      seeds: [
+        // "escrow_vault" as bytes
+        bytesEncoder.encode(new Uint8Array([101, 115, 99, 114, 111, 119, 95, 118, 97, 117, 108, 116]))
+      ]
+    });
+    return pda;
+  };
+  /*
+   * Return the address of the platform fee vault account.
+   * @returns The address of the platform fee vault account.
+   */
+  getPlatformFeeVaultAccountAddress = async () => {
+    const bytesEncoder = getBytesEncoder15();
+    const [pda] = await getProgramDerivedAddress10({
+      programAddress: PAYAI_MARKETPLACE_PROGRAM_ADDRESS,
+      seeds: [
+        // "platform_fee_vault" as bytes
+        bytesEncoder.encode(new Uint8Array([112, 108, 97, 116, 102, 111, 114, 109, 95, 102, 101, 101, 95, 118, 97, 117, 108, 116]))
+      ]
+    });
+    return pda;
+  };
   /* 
    * Return the global state account.
    * @returns The global state account.
@@ -1118,6 +1311,13 @@ var Payment = class {
     elizaLogger.debug("BuyerContractCounter account:", account);
     return account;
   };
+  /*
+   * Start the contract by funding the escrow.
+   * @param cid - The IFPS CID of the Agreement.
+   * @param seller - The address of the seller.
+   * @param escrowAmount - The amount of lamports to fund the escrow.
+   * @returns The signature of the transaction.
+   */
   startContract = async (cid, seller, escrowAmount) => {
     var _a;
     elizaLogger.debug("Executing contract by funding escrow...");
@@ -1130,7 +1330,6 @@ var Payment = class {
     }
     const contractAccountAddress = await this.getContractAccountAddress(buyer, (_a = buyerContractCounter.data) == null ? void 0 : _a.counter);
     const globalStateAddress = await this.getGlobalStateAccountAddress();
-    const globalState = await this.getGlobalStateAccount();
     const startContractTx = await getStartContractInstructionAsync({
       signer: this.authority,
       buyerContractCounter,
@@ -1146,6 +1345,31 @@ var Payment = class {
       (tx) => this.signAndSendTransaction(this.rpcClient, tx)
     );
     elizaLogger.info("Contract started.");
+    return signature;
+  };
+  /*
+   * Release the payment from the contract.
+   * @param contractAccountAddress - The address of the contract account.
+   * @param seller - The address of the seller.
+   * @returns The signature of the transaction.
+   */
+  releasePayment = async (contractAccountAddress, seller) => {
+    elizaLogger.debug("Releasing funds from contract...");
+    const globalStateAddress = await this.getGlobalStateAccountAddress();
+    const platformFeeVaultAddress = await this.getPlatformFeeVaultAccountAddress();
+    const releasePaymentTx = await getReleasePaymentInstructionAsync({
+      signer: this.authority,
+      contract: contractAccountAddress,
+      seller,
+      globalState: globalStateAddress,
+      platformFeeVault: platformFeeVaultAddress
+    });
+    const signature = await pipe(
+      await this.createDefaultTransaction(),
+      (tx) => appendTransactionMessageInstruction(releasePaymentTx, tx),
+      (tx) => this.signAndSendTransaction(this.rpcClient, tx)
+    );
+    elizaLogger.info(`Funds released for contract ${contractAccountAddress}`);
     return signature;
   };
   /*
@@ -1206,6 +1430,7 @@ var PayAIClient = class {
    * Initializes the PayAI Client by creating libp2p, Helia, and OrbitDB instances.
    */
   async initialize(runtime) {
+    var _a;
     try {
       elizaLogger2.info("Initializing PayAI Client");
       const agentDir = dataDir + "/" + runtime.character.name;
@@ -1215,7 +1440,10 @@ var PayAIClient = class {
       const libp2pDatastore = new LevelDatastore(agentDir + "/libp2p");
       const libp2pConfig = Object.assign({}, libp2pOptions);
       libp2pConfig.datastore = libp2pDatastore;
+      const libp2pPrivateKey = await getOrCreateLibp2pKeypair(agentDir + "/libp2p/keypair.json");
+      libp2pConfig.privateKey = libp2pPrivateKey;
       this.libp2p = await createLibp2p(libp2pConfig);
+      elizaLogger2.info("libp2p PeerID: ", (_a = this.libp2p) == null ? void 0 : _a.peerId.toString());
       const blockstore = new FsBlockstore(agentDir + "/ipfs");
       this.ipfs = await createHelia({ libp2p: this.libp2p, blockstore });
       this.orbitdb = await createOrbitDB({ ipfs: this.ipfs, directory: agentDir });
@@ -1254,10 +1482,16 @@ var PayAIClient = class {
    * @param runtime - The runtime context for the client.
    */
   async initSellerAgentFunctionality(runtime) {
-    if (fs.existsSync(this.servicesConfigPath)) {
-      const localServices = JSON.parse(fs.readFileSync(this.servicesConfigPath, "utf-8"));
+    var _a;
+    if (fs2.existsSync(this.servicesConfigPath)) {
+      const localServices = JSON.parse(fs2.readFileSync(this.servicesConfigPath, "utf-8"));
       this.setServicesConfig(localServices);
-      const localServiceAd = await prepareServiceAd(localServices, runtime);
+      const contactInfo = { "libp2p": (_a = this.libp2p) == null ? void 0 : _a.peerId.toString() };
+      const twitterUsername = runtime.getSetting("TWITTER_USERNAME");
+      if (twitterUsername) {
+        contactInfo["twitter"] = `@${twitterUsername}`;
+      }
+      const localServiceAd = await prepareServiceAd(localServices, runtime, contactInfo);
       const fetchedServiceAds = await queryOrbitDbReturningCompleteEntries(
         this.serviceAdsDB,
         (doc) => {
@@ -1269,7 +1503,7 @@ var PayAIClient = class {
         await this.publishPreparedServiceAd(localServiceAd);
       } else {
         this.sellerServiceAdCID = getCIDFromOrbitDbHash(fetchedServiceAds[0].hash);
-        elizaLogger2.info("Local services marches serviceAdsDB, no need to update the database");
+        elizaLogger2.info("Local services matches serviceAdsDB, no need to update the database");
       }
     }
   }
@@ -1285,7 +1519,7 @@ var PayAIClient = class {
    * Updates the servicesConfig in memory.
    */
   saveSellerServices(services) {
-    fs.writeFileSync(this.servicesConfigPath, services);
+    fs2.writeFileSync(this.servicesConfigPath, services);
     this.setServicesConfig(services);
   }
   /*
@@ -1370,14 +1604,201 @@ var PayAIClient = class {
 };
 var payAIClient = new PayAIClient();
 
+// src/services/services.ts
+import { Service, elizaLogger as elizaLogger3, ServiceType, stringToUuid, composeContext, generateText, ModelClass, cleanJsonResponse } from "@elizaos/core";
+var successfulResponseToUserTemplate = `
+# About {{agentName}}
+{{bio}}
+{{lore}}
+
+# Task:
+Create a twitter post responding to the buyer letting them know that you have completed the work for this job.
+Ask them to review the work and then release the payment if they are happy with the work.
+Your response should be 260 characters or less.
+The completed work is available at the following URL: {{completedWorkUrl}}
+Don't tag the user in your response.
+
+Here is a preview of the completed work:
+{{previewOfCompletedWork}}
+
+Here is your previous conversation with the buyer:
+{{recentMessages}}
+
+For example:
+{
+    "success": true,
+    "result": "A natural message informing the user that the work has been completed, asking them to review the work, and including the URL to the work."
+}
+
+Return JSON markdown only.
+`;
+var PayAIJobManagerService = class extends Service {
+  static get serviceType() {
+    return ServiceType.TEXT_GENERATION;
+  }
+  handleWorkInterval;
+  async initialize(runtime) {
+    this.handleWorkInterval = setInterval(() => {
+      this.handlePayAIWork(runtime);
+    }, 6e4);
+    elizaLogger3.info("PayAIJobManagerService initialized");
+  }
+  async stop() {
+    clearInterval(this.handleWorkInterval);
+    elizaLogger3.info("PayAIJobManagerService stopped");
+  }
+  /**
+   * Handles PayAI work tasks in the background
+   * @param runtime The agent runtime instance
+   */
+  async handlePayAIWork(runtime) {
+    elizaLogger3.debug("Checking for new jobs to work on.");
+    const cacheKey = `${runtime.agentId}-payai-contracts`;
+    const contracts = await runtime.cacheManager.get(cacheKey);
+    if (!contracts) {
+      elizaLogger3.debug("No new jobs to be worked");
+      return;
+    }
+    for (let contract in contracts) {
+      const jobDetails = await runtime.cacheManager.get(
+        `${runtime.agentId}-payai-job-details-contract-${contract}`
+      );
+      if (jobDetails.status === "NOT_STARTED") {
+        try {
+          await runJob(runtime, contract, jobDetails);
+        } catch (error) {
+          console.error(error);
+          elizaLogger3.error(`Error working on job ${jobDetails.agreementCID}:`, error);
+          jobDetails.status = "FAILED";
+          await runtime.cacheManager.set(`${runtime.agentId}-payai-job-details-contract-${contract}`, jobDetails);
+          elizaLogger3.debug("Marked job as FAILED");
+        }
+      } else if (jobDetails.status === "IN_PROGRESS") {
+        elizaLogger3.debug("Job is in progress, need to implement checking if the work is complete.");
+      } else if (jobDetails.status === "COMPLETED") {
+        elizaLogger3.debug("Job is completed, now attempting to deliver the work.");
+        const completedWorkUrl = jobDetails.completedWork.url;
+        const previewOfCompletedWork = jobDetails.completedWork.message;
+        const contactInfo = jobDetails.contactInfo;
+        const state = await runtime.composeState(
+          jobDetails.elizaMessage,
+          { completedWorkUrl, previewOfCompletedWork }
+        );
+        const successfulResponseToUserContext = composeContext({
+          state,
+          template: successfulResponseToUserTemplate
+        });
+        const successfulResponseToUserText = await generateText({
+          runtime,
+          context: successfulResponseToUserContext,
+          modelClass: ModelClass.LARGE
+        });
+        const successfulResponseToUser = JSON.parse(cleanJsonResponse(successfulResponseToUserText));
+        const messageToUser = `@${contactInfo.handle} ${successfulResponseToUser.result}`;
+        const twitterClient = await getTwitterClientFromRuntime(runtime);
+        const coversationId = jobDetails.contactInfo.conversationId.split("/").pop();
+        try {
+          await twitterClient.post.postTweet(
+            runtime,
+            twitterClient.client,
+            messageToUser,
+            jobDetails.contactInfo.roomId,
+            messageToUser,
+            coversationId
+          );
+          jobDetails.status = "DELIVERED";
+          await runtime.cacheManager.set(`${runtime.agentId}-payai-job-details-contract-${contract}`, jobDetails);
+          elizaLogger3.debug("Marked job as DELIVERED");
+        } catch (error) {
+          elizaLogger3.error("Error posting new tweet: ", error);
+          console.error(error);
+        }
+      } else if (jobDetails.status === "FAILED") {
+        elizaLogger3.debug("Job failed, now attempting to retry the job.");
+        await runJob(runtime, contract, jobDetails);
+      } else if (jobDetails.status === "DELIVERED") {
+        elizaLogger3.debug("Job delivered, any cleanup work can be done here.");
+        await runtime.cacheManager.delete(`${runtime.agentId}-payai-contracts-${contract}`);
+        elizaLogger3.debug("Contract removed from cache");
+      } else {
+        elizaLogger3.warn("Unknown job status, dropping job. You should look into this.");
+        elizaLogger3.debug("jobDetails: ", jobDetails);
+        await runtime.cacheManager.delete(`${runtime.agentId}-payai-contracts-${contract}`);
+      }
+    }
+  }
+};
+async function runJob(runtime, contract, jobDetails) {
+  var _a, _b;
+  const callback = async (response, files) => {
+    jobDetails.completedWork = {
+      message: response.text,
+      url: response.url
+    };
+    await runtime.cacheManager.set(`${runtime.agentId}-payai-job-details-contract-${contract}`, jobDetails);
+    return [{
+      userId: jobDetails.elizaMessage.userId,
+      agentId: jobDetails.elizaMessage.agentId,
+      content: {
+        text: response.text,
+        url: response.url
+      },
+      roomId: stringToUuid(`payai-${contract}-${runtime.agentId}`)
+    }];
+  };
+  const serviceToActions = (_a = runtime.character.payai) == null ? void 0 : _a.serviceToActions;
+  const buyOffer = jobDetails.buyOffer;
+  const desiredServiceID = buyOffer.desiredServiceID;
+  const desiredUnitAmount = buyOffer.desiredUnitAmount;
+  const action = serviceToActions[desiredServiceID];
+  jobDetails.status = "IN_PROGRESS";
+  await runtime.cacheManager.set(`${runtime.agentId}-payai-job-details-contract-${contract}`, jobDetails);
+  elizaLogger3.debug("marked job as IN_PROGRESS");
+  const state = await runtime.composeState(jobDetails.elizaMessage, {
+    jobDetails
+  });
+  for (let i = 0; i < desiredUnitAmount; i++) {
+    await runtime.processActions(
+      jobDetails.elizaMessage,
+      [
+        {
+          userId: jobDetails.elizaMessage.userId,
+          agentId: jobDetails.elizaMessage.agentId,
+          roomId: jobDetails.elizaMessage.roomId,
+          content: {
+            text: "",
+            action,
+            source: jobDetails.elizaMessage.content.source
+          },
+          embedding: []
+        }
+      ],
+      state,
+      (response) => {
+        return callback(response);
+      }
+    );
+  }
+  jobDetails = await runtime.cacheManager.get(`${runtime.agentId}-payai-job-details-contract-${contract}`);
+  if ((_b = jobDetails == null ? void 0 : jobDetails.completedWork) == null ? void 0 : _b.url) {
+    jobDetails.status = "COMPLETED";
+    elizaLogger3.debug("Marked job as COMPLETED");
+  } else {
+    jobDetails.status = "FAILED";
+    elizaLogger3.debug("Marked job as FAILED");
+  }
+  await runtime.cacheManager.set(`${runtime.agentId}-payai-job-details-contract-${contract}`, jobDetails);
+}
+var payAIJobManagerService = new PayAIJobManagerService();
+
 // src/actions/browseAgents.ts
 import {
-  ModelClass,
-  composeContext,
-  elizaLogger as elizaLogger3,
-  generateText,
+  ModelClass as ModelClass2,
+  composeContext as composeContext2,
+  elizaLogger as elizaLogger4,
+  generateText as generateText2,
   getEmbeddingZeroVector,
-  cleanJsonResponse
+  cleanJsonResponse as cleanJsonResponse2
 } from "@elizaos/core";
 var findMatchingServicesTemplate = `
 Analyze the following conversation to extract a list of services that match what the user is looking for.
@@ -1385,10 +1806,11 @@ Analyze the following conversation to extract a list of services that match what
 The Service Name is the name of the service that the Seller is offering.
 The Service Description is a brief description of the service.
 The Service Price is the price of the service.
+The Required Info is any additional details that the buyer needs to provide to the seller to complete the service.
 The Seller is identified by their solana wallet address.
 The Service Ad CID is identified by the hash of the entry.
 The Service ID is the unique identifier of the service within a service advertisement.
-
+The Contact Info is the contact information of the seller. This can be a twitter handle and/or a libp2p peer id.
 
 All possible services:
 
@@ -1409,16 +1831,20 @@ For example:
 Service Name
 Service Description
 Service Price
+Required Info
 Seller: B2imQsisfrTLoXxzgQfxtVJ3vQR9bGbpmyocVu3nWGJ6
 Service Ad CID: bafyreifo4inpuekp466muw2bmldqkg6zetiwi6psjyiwzzyz35bsmcvhrq
 Service ID
+Contact Info
 
 Service Name
 Service Description
 Service Price
+Required Info
 Seller: updtkJ8HAhh3rSkBCd3p9Z1Q74yJW4rMhSbScRskDPM
 Service Ad CID: bafyreifo4inpuekp46zetiwi6psjyiwzzyz35bsmcvhrq6muw2bmldqkg6
-Service ID"
+Service ID
+Contact Info"
 }
 
 If no matching services were found, then set the "success" field to false and set the result to a string informing the user that no matching services were found, and ask them to try rewording their search. Be natural and polite.
@@ -1426,6 +1852,42 @@ For example, if there were no matching services, then return:
 {
     "success": false,
     "result": "A natural message informing the user that no matching services were found, and to try rewording their search."
+}
+
+Only return a JSON mardown block.
+`;
+var formatResponseForTwitterTemplate = `
+# About {{agentName}}
+{{bio}}
+{{lore}}
+
+# Task:
+Prepare a response for Twitter.
+It needs to be 280 characters or less.
+
+You previously gave me a list of services that are available on the PayAI marketplace.
+
+Here is the list of services:
+
+{{matchingServices}}
+
+I need you to choose only one service from the list, that best matches the user's query.
+
+Here is the user's query:
+
+{{searchQuery}}
+
+You should prefer services that have contact information that includes a Twitter handle.
+
+I want you to prepare your response so that it only includes
+ - the seller's Twitter handle
+ - the cost of the service
+ - the ipfs link to the service ad including the CID
+
+For example:
+{
+    "success": true,
+    "result": "I found a seller that offers this service! The seller is @tickertaco_ and the cost is 1 SOL. Here is the link to the service ad: https://ipfs.io/ipfs/bafyreifo4inpuekp46zetiwi6psjyiwzzyz35bsmcvhrq6muw2bmldqkg6"
 }
 
 Only return a JSON mardown block.
@@ -1452,19 +1914,19 @@ var browseAgents = {
       const servicesString = JSON.stringify(services, null, 2);
       state.services = servicesString;
       state.searchQuery = searchQuery;
-      const findMatchingServicesContext = composeContext({
+      const findMatchingServicesContext = composeContext2({
         state,
         template: findMatchingServicesTemplate
       });
-      const findMatchingServicesContent = await generateText({
+      const findMatchingServicesContent = await generateText2({
         runtime,
         context: findMatchingServicesContext,
-        modelClass: ModelClass.LARGE
+        modelClass: ModelClass2.LARGE
       });
-      elizaLogger3.debug("found these matching services from the conversation:", findMatchingServicesContent);
-      const matchingServices = JSON.parse(cleanJsonResponse(findMatchingServicesContent));
+      elizaLogger4.debug("found these matching services from the conversation:", findMatchingServicesContent);
+      const matchingServices = JSON.parse(cleanJsonResponse2(findMatchingServicesContent));
       if (matchingServices.success === false || matchingServices.success === "false") {
-        elizaLogger3.info("Couldn't find any services matching the user's request.");
+        elizaLogger4.info("Couldn't find any services matching the user's request.");
         if (callback) {
           callback({
             text: matchingServices.result,
@@ -1473,6 +1935,34 @@ var browseAgents = {
           });
         }
         return false;
+      }
+      if (callback && message.content.source === "twitter") {
+        state.matchingServices = matchingServices.result;
+        const formatResponseForTwitterContext = composeContext2({
+          state,
+          template: formatResponseForTwitterTemplate
+        });
+        const formatResponseForTwitterContent = await generateText2({
+          runtime,
+          context: formatResponseForTwitterContext,
+          modelClass: ModelClass2.LARGE
+        });
+        const responseToUser2 = JSON.parse(cleanJsonResponse2(formatResponseForTwitterContent));
+        elizaLogger4.info("response to user:", responseToUser2);
+        const newMemory = {
+          userId: message.agentId,
+          agentId: message.agentId,
+          roomId: message.roomId,
+          content: {
+            text: responseToUser2.result,
+            action: "BROWSE_PAYAI_AGENTS",
+            source: message.content.source
+          },
+          embedding: getEmbeddingZeroVector()
+        };
+        await callback(newMemory.content);
+        await runtime.messageManager.createMemory(newMemory);
+        return true;
       }
       const responseToUser = matchingServices.result;
       if (callback) {
@@ -1488,18 +1978,12 @@ var browseAgents = {
           },
           embedding: getEmbeddingZeroVector()
         };
+        await callback(newMemory.content);
         await runtime.messageManager.createMemory(newMemory);
-        callback(newMemory.content);
       }
       return true;
     } catch (error) {
       console.error("Error in BROWSE_PAYAI_AGENTS handler:", error);
-      if (callback) {
-        callback({
-          text: "Error processing BROWSE_PAYAI_AGENTS request.",
-          content: { error: "Error processing BROWSE_PAYAI_AGENTS request." }
-        });
-      }
       return false;
     }
   },
@@ -1530,11 +2014,11 @@ var browseAgents_default = browseAgents;
 
 // src/actions/makeOfferAction.ts
 import {
-  ModelClass as ModelClass2,
-  composeContext as composeContext2,
-  elizaLogger as elizaLogger4,
-  generateText as generateText2,
-  cleanJsonResponse as cleanJsonResponse2,
+  ModelClass as ModelClass3,
+  composeContext as composeContext3,
+  elizaLogger as elizaLogger5,
+  generateText as generateText3,
+  cleanJsonResponse as cleanJsonResponse3,
   getEmbeddingZeroVector as getEmbeddingZeroVector2
 } from "@elizaos/core";
 var extractOfferDetailsTemplate = `
@@ -1544,9 +2028,9 @@ Offer Details have this schema when successful:
     "success": true,
     "result": {
         "serviceAdCID": "hash of the seller's services",
-        "wallet": "Solana public key of the seller",
-        "desiredServiceID": "ID of the service the buyer wants to purchase",
-        "desiredUnitAmount": "Amount of units the buyer wants to purchase"
+        "desiredServiceID": "ID of the service the buyer wants to purchase or 0 if not provided",
+        "desiredUnitAmount": "Amount of units the buyer wants to purchase or 1 if not provided",
+        "infoFromBuyer": "Any additional details that the buyer needs to provide to the seller to complete the service or empty string if not provided"
 }
 
 Offer Details have this schema when unsuccessful:
@@ -1559,33 +2043,57 @@ Conversation:
 {{recentMessages}}
 
 
-Return a JSON object containing only the fields where information was clearly found.
+Return a JSON object containing the following fields.
 For example:
 {
     "success": true,
     "result": {
         "serviceAdCID": "hash of the seller's services",
-        "wallet": "Solana public key of the seller",
-        "desiredServiceID": "ID of the service the buyer wants to purchase",
-        "desiredUnitAmount": "Amount of units the buyer wants to purchase"
+        "desiredServiceID": "ID of the service the buyer wants to purchase or 0 if not provided",
+        "desiredUnitAmount": "Amount of units the buyer wants to purchase or 1 if not provided",
+        "infoFromBuyer": "Any additional details that the buyer needs to provide to the seller to complete the service or empty string if not provided"
     }
 }
 
-If the buyer provided the seller's identity or wallet in the conversation, then set the wallet field to equal the seller's identity or wallet.
-If the buyer provided the service ID or amount of units in the conversation, then set the desiredServiceID or desiredUnitAmount fields to equal the service ID or amount of units.
-If the buyer provided the seller's service ad CID in the conversation, then set the serviceAdCID field to equal the seller's service ad CID.
+If the buyer provided the service ID then set the desiredServiceID to the service ID. Otherwise set the desiredServiceID to "0" if not provided.
+If the buyer provided the amount of units then set the desiredUnitAmount to the amount of units. Otherwise set the desiredUnitAmount to "1" if not provided.
+If the buyer provided the seller's service ad CID in the conversation, then set the serviceAdCID to the CID.
+If the buyer provided the seller with any additional details in the conversation, then set the infoFromBuyer to the additional details.
 
-If not all information was provided, or the information was unclear, then set the "success" field to false and set the result to a string asking the user to provide the missing information.
-For example, if you could only find the seller's wallet or identity, then return:
+If not all information could be determined from the conversation and from your instructions, then set the "success" field to false and set the result to a string asking the user to provide the missing information.
+For example:
 {
     "success": false,
-    "result": "Please provide the service ID, and the amount of units you want to purchase."
+    "result": "Natural language asking for the missing information."
 }
 
-Make sure you recognize when a user is asking to purchase a new service.
-If you see in the message history that you recently created a purchase order for a user, and now they are asking for a new service, then you should forget the previous order that they created and help them create a new purchase order for a new service.
-
 Only return a JSON markdown block.
+`;
+var successfulResponseToUserTemplate2 = `
+# About {{agentName}}
+{{bio}}
+{{lore}}
+
+# Task:
+Based on the conversation below, respond to the seller letting them know that you have made an offer for their service, and ask them to accept it and sign an agreement.
+You should use your own words and style.
+The response should be 260 characters or less.
+
+Conversation:
+{{recentMessages}}
+
+
+Make sure to include the @username of the seller and the link of the buy offer that you created so that the seller can check it out.
+The link is https://ipfs.io/ipfs/{{buyOfferCID}}
+
+
+For example:
+{
+    "success": true,
+    "result": "A natural message tagging the seller and informing them that the offer has been made, and the ipfs link to the buy offer."
+}
+
+Return JSON markdown only.
 `;
 var makeOfferAction = {
   name: "MAKE_OFFER",
@@ -1602,23 +2110,23 @@ var makeOfferAction = {
       } else {
         state = await runtime.updateRecentMessageState(state);
       }
-      const makeOfferContext = composeContext2({
+      const makeOfferContext = composeContext3({
         state,
         template: extractOfferDetailsTemplate
       });
-      const extractedDetailsText = await generateText2({
+      const extractedDetailsText = await generateText3({
         runtime,
         context: makeOfferContext,
-        modelClass: ModelClass2.SMALL
+        modelClass: ModelClass3.LARGE
       });
-      elizaLogger4.debug("extractedDetailsText:", extractedDetailsText);
-      const extractedDetails = JSON.parse(cleanJsonResponse2(extractedDetailsText));
-      elizaLogger4.debug("extractedDetails:", extractedDetails);
-      if (extractedDetails.success === false || extractedDetails.success === "false") {
-        elizaLogger4.info("Need more information from the user to make an offer.");
+      elizaLogger5.debug("extractedDetailsText:", extractedDetailsText);
+      const extractedDetails = JSON.parse(cleanJsonResponse3(extractedDetailsText));
+      elizaLogger5.debug("extractedDetails:", extractedDetails);
+      if (extractedDetails.success === false) {
+        elizaLogger5.info("Need more information from the user to make an offer.");
         if (callback) {
           callback({
-            text: extractedDetails.result,
+            text: `@${state.senderName} ${extractedDetails.result}`,
             action: "MAKE_OFFER",
             source: message.content.source
           });
@@ -1627,44 +2135,46 @@ var makeOfferAction = {
       }
       const offerDetails = {
         serviceAdCID: extractedDetails.result.serviceAdCID,
-        desiredServiceID: extractedDetails.result.desiredServiceID,
-        desiredUnitAmount: extractedDetails.result.desiredUnitAmount
+        desiredServiceID: extractedDetails.result.desiredServiceID || "0",
+        desiredUnitAmount: extractedDetails.result.desiredUnitAmount || "1",
+        infoFromBuyer: extractedDetails.result.infoFromBuyer
       };
       const buyOffer = await prepareBuyOffer(offerDetails, runtime);
-      elizaLogger4.debug("Publishing buy offer to IPFS:", buyOffer);
+      elizaLogger5.debug("Publishing buy offer to IPFS:", buyOffer);
       const result = await payAIClient.buyOffersDB.put(buyOffer);
       const CID3 = getCIDFromOrbitDbHash(result);
-      elizaLogger4.info("Published Buy Offer to IPFS: ", CID3);
-      let responseToUser = `Successfully made an offer for ${offerDetails.desiredUnitAmount} units of service ID ${offerDetails.desiredServiceID} from seller ${extractedDetails.result.wallet}.`;
-      responseToUser += `
-Your Buy Offer's IPFS CID is ${CID3}`;
+      elizaLogger5.info("Published Buy Offer to IPFS: ", CID3);
+      state.buyOfferCID = CID3;
+      const successfulResponseToUserContext = composeContext3({
+        state,
+        template: successfulResponseToUserTemplate2
+      });
+      const successfulResponseToUserText = await generateText3({
+        runtime,
+        context: successfulResponseToUserContext,
+        modelClass: ModelClass3.LARGE
+      });
+      const successfulResponseToUser = JSON.parse(cleanJsonResponse3(successfulResponseToUserText));
+      elizaLogger5.debug("Successful response to user:", successfulResponseToUser.result);
       if (callback) {
         const newMemory = {
           userId: message.agentId,
           agentId: message.agentId,
           roomId: message.roomId,
           content: {
-            text: responseToUser,
+            text: `${successfulResponseToUser.result}`,
             action: "MAKE_OFFER",
-            source: message.content.source,
-            buyOffer: offerDetails
+            source: message.content.source
           },
           embedding: getEmbeddingZeroVector2()
         };
+        await callback(newMemory.content);
         await runtime.messageManager.createMemory(newMemory);
-        callback(newMemory.content);
       }
       return true;
     } catch (error) {
-      elizaLogger4.error("Error in MAKE_OFFER handler:", error);
+      elizaLogger5.error("Error in MAKE_OFFER handler:", error);
       console.error(error);
-      if (callback) {
-        callback({
-          text: "Error processing MAKE_OFFER request.",
-          action: "MAKE_OFFER",
-          source: message.content.source
-        });
-      }
       return false;
     }
   },
@@ -1679,7 +2189,7 @@ Your Buy Offer's IPFS CID is ${CID3}`;
       {
         user: "{{user2}}",
         content: {
-          text: "Successfully made an offer for ${offerDetails.desiredUnitAmount} units of service ID ${offerDetails.desiredServiceID} from seller ${extractedDetails.result.wallet}. Your Buy Offer's IPFS CID is bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi",
+          text: "Successfully made an offer for to the seller. Your Buy Offer's IPFS CID is bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi",
           action: "MAKE_OFFER"
         }
       }
@@ -1688,58 +2198,13 @@ Your Buy Offer's IPFS CID is ${CID3}`;
       {
         user: "{{user1}}",
         content: {
-          text: "I want to purchase 3 units of service ID 2."
+          text: "I want to purchase service with CID."
         }
       },
       {
         user: "{{user2}}",
         content: {
-          text: "Please provide the seller's identity, the service ID, and the amount of units you want to purchase.",
-          action: "MAKE_OFFER"
-        }
-      }
-    ],
-    [
-      {
-        user: "{{user1}}",
-        content: {
-          text: "I want to purchase service ID 1."
-        }
-      },
-      {
-        user: "{{user2}}",
-        content: {
-          text: "Please provide the seller's identity, the service ID, and the amount of units you want to purchase.",
-          action: "MAKE_OFFER"
-        }
-      }
-    ],
-    [
-      {
-        user: "{{user1}}",
-        content: {
-          text: "I want to purchase seller 9ovkK7WoiSXyEJDM5cZG3or3W95bdzZLDDHhuMgSJT9U"
-        }
-      },
-      {
-        user: "{{user2}}",
-        content: {
-          text: "Please provide the seller's identity, the service ID, and the amount of units you want to purchase.",
-          action: "MAKE_OFFER"
-        }
-      }
-    ],
-    [
-      {
-        user: "{{user1}}",
-        content: {
-          text: "I want to purchase 5 units of service ID 1 from seller 9ovkK7WoiSXyEJDM5cZG3or3W95bdzZLDDHhuMgSJT9U"
-        }
-      },
-      {
-        user: "{{user2}}",
-        content: {
-          text: "Please provide the serviceAdCID of the seller's services.",
+          text: "Please provide the service ad CID",
           action: "MAKE_OFFER"
         }
       }
@@ -1750,11 +2215,11 @@ var makeOfferAction_default = makeOfferAction;
 
 // src/actions/acceptOfferAction.ts
 import {
-  ModelClass as ModelClass3,
-  composeContext as composeContext3,
-  elizaLogger as elizaLogger5,
-  generateText as generateText3,
-  cleanJsonResponse as cleanJsonResponse3,
+  ModelClass as ModelClass4,
+  composeContext as composeContext4,
+  elizaLogger as elizaLogger6,
+  generateText as generateText4,
+  cleanJsonResponse as cleanJsonResponse4,
   getEmbeddingZeroVector as getEmbeddingZeroVector3
 } from "@elizaos/core";
 var extractOfferCIDTemplate = `
@@ -1771,8 +2236,17 @@ For example:
     }
 }
 
-If the buyer did not provide the CID of the Buy Offer, then set the "success" field to false and set the result to a string asking the user to provide the missing information.
-For example, if you could not find the CID of the Buy Offer, then return:
+If you found a short url like https://t.co/9dj1CQ98yG instead of a CID, then you can set that as the "buyOfferCID" field.
+For example:
+{
+    "success": true,
+    "result": {
+        "buyOfferCID": "https://t.co/9dj1CQ98yG"
+    }
+}
+
+If the buyer did not provide the CID of the Buy Offer nor a short url, then set the "success" field to false and set the result to a string asking the user to provide the missing information.
+For example:
 {
     "success": false,
     "result": "Please provide the CID of the Buy Offer."
@@ -1780,10 +2254,38 @@ For example, if you could not find the CID of the Buy Offer, then return:
 
 Only return a JSON markdown block.
 `;
+var successfulResponseToUserTemplate3 = `
+# About {{agentName}}
+{{bio}}
+{{lore}}
+
+# Task:
+Based on the conversation below, respond to the buyer letting them know that you have accepted their offer.
+Ask the buyer to fund the contract.
+You should use your own words and style.
+Don't tag the buyer in your response.
+The response should be 260 characters or less.
+
+
+Conversation:
+{{recentMessages}}
+
+Make sure to include the link of the agreement that you created so that the buyer can review it.
+The link is https://ipfs.io/ipfs/{{agreementCID}}
+
+
+For example:
+{
+    "success": true,
+    "result": "A natural message informing the user that the offer has been accepted, asking them to fund the contract, and including the ipfs link to the agreement."
+}
+
+Return JSON markdown only.
+`;
 var acceptOfferAction = {
   name: "ACCEPT_OFFER",
   similes: ["AGREE_TO_OFFER", "ACCEPT_PROPOSAL", "ACCEPT_TERMS", "ACCEPT_BUY_OFFER"],
-  description: "This action allows a seller to accept an offer from a buyer on the PayAI marketplace.",
+  description: "This action allows a seller to check a buy offer from a buyer and accept it on the PayAI marketplace.",
   suppressInitialMessage: true,
   validate: async (runtime, message) => {
     return true;
@@ -1795,31 +2297,35 @@ var acceptOfferAction = {
       } else {
         state = await runtime.updateRecentMessageState(state);
       }
-      const acceptOfferContext = composeContext3({
+      const acceptOfferContext = composeContext4({
         state,
         template: extractOfferCIDTemplate
       });
-      const extractedDetailsText = await generateText3({
+      const extractedDetailsText = await generateText4({
         runtime,
         context: acceptOfferContext,
-        modelClass: ModelClass3.SMALL
+        modelClass: ModelClass4.LARGE
       });
-      elizaLogger5.debug("extracted the following Buy Offer CID from the conversation:", extractedDetailsText);
-      const extractedDetails = JSON.parse(cleanJsonResponse3(extractedDetailsText));
-      if (extractedDetails.success === false || extractedDetails.success === "false") {
-        elizaLogger5.info("Need more information from the user to accept the offer.");
+      elizaLogger6.debug("extracted the following Buy Offer CID from the conversation:", extractedDetailsText);
+      const extractedDetails = JSON.parse(cleanJsonResponse4(extractedDetailsText));
+      if (extractedDetails.success === false) {
+        elizaLogger6.info("Need more information from the user to accept the offer.");
         if (callback) {
           callback({
-            text: extractedDetails.result,
+            text: `@${state.senderName} ${extractedDetails.result}`,
             action: "ACCEPT_OFFER",
             source: message.content.source
           });
         }
         return false;
       }
-      const { isValid, reason } = await isValidBuyOffer(extractedDetails.result.buyOfferCID, runtime);
+      if (extractedDetails.result.buyOfferCID.includes("t.co")) {
+        const cid = await getCIDFromShortUrl(extractedDetails.result.buyOfferCID);
+        extractedDetails.result.buyOfferCID = cid;
+      }
+      const { isValid, reason } = await isValidBuyOffer(extractedDetails.result.buyOfferCID);
       if (!isValid) {
-        elizaLogger5.info(reason);
+        elizaLogger6.info(reason);
         if (callback) {
           callback({
             text: `@${state.senderName} ${reason}`,
@@ -1834,30 +2340,41 @@ var acceptOfferAction = {
         accept: true
       };
       const agreement = await prepareAgreement(agreementDetails, runtime);
-      elizaLogger5.debug("Publishing agreement to IPFS:", agreement);
+      elizaLogger6.debug("Publishing agreement to IPFS:", agreement);
       const result = await payAIClient.agreementsDB.put(agreement);
       const CID3 = getCIDFromOrbitDbHash(result);
-      elizaLogger5.info("Published Agreement to IPFS: ", CID3);
-      let responseToUser = `@${state.senderName} I accepted the offer and signed an agreement. The Agreement's IPFS CID is ${CID3}`;
+      elizaLogger6.info("Published Agreement to IPFS: ", CID3);
+      state.agreementCID = CID3;
+      const successfulResponseToUserContext = composeContext4({
+        state,
+        template: successfulResponseToUserTemplate3
+      });
+      const successfulResponseToUserText = await generateText4({
+        runtime,
+        context: successfulResponseToUserContext,
+        modelClass: ModelClass4.LARGE
+      });
+      const successfulResponseToUser = JSON.parse(cleanJsonResponse4(successfulResponseToUserText));
+      elizaLogger6.debug("Successful response to user:", successfulResponseToUser.result);
       if (callback) {
         const newMemory = {
           userId: message.agentId,
           agentId: message.agentId,
           roomId: message.roomId,
           content: {
-            text: responseToUser,
+            text: `@${state.senderName} ${successfulResponseToUser.result}`,
             action: "ACCEPT_OFFER",
             source: message.content.source,
             agreement: agreementDetails
           },
           embedding: getEmbeddingZeroVector3()
         };
+        await callback(newMemory.content);
         await runtime.messageManager.createMemory(newMemory);
-        callback(newMemory.content);
       }
       return true;
     } catch (error) {
-      elizaLogger5.error("Error in ACCEPT_OFFER handler:", error);
+      elizaLogger6.error("Error in ACCEPT_OFFER handler:", error);
       console.error(error);
       return false;
     }
@@ -1867,7 +2384,7 @@ var acceptOfferAction = {
       {
         user: "{{user1}}",
         content: {
-          text: "I sent you a buy offer with CID bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi"
+          text: "Hey I've just made an offer for your service! You can see it here: https://ipfs.io/ipfs/bafyreie5jopsd22lrb5d46qgmytjobxs72lqopdkrayf6e3mvblwufld7m. Looking forward to working with you!"
         }
       },
       {
@@ -1883,7 +2400,7 @@ var acceptOfferAction = {
       {
         user: "{{user1}}",
         content: {
-          text: "I sent you a buy offer with CID bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi"
+          text: "Hey I've just made an offer for your service! You can see it here: https://ipfs.io/ipfs/bafyreie5jopsd22lrb5d46qgmytjobxs72lqopdkrayf6e3mvblwufld7m. Looking forward to working with you!"
         }
       },
       {
@@ -1893,42 +2410,10 @@ var acceptOfferAction = {
           action: "ACCEPT_OFFER"
         }
       }
-    ],
-    // Example where the user provides a Buy Offer that references a non-existent Service Ad
-    [
-      {
-        user: "{{user1}}",
-        content: {
-          text: "I sent you a buy offer with CID bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi"
-        }
-      },
-      {
-        user: "{{user2}}",
-        content: {
-          text: "ServiceAd referenced by Buy Offer does not exist",
-          action: "ACCEPT_OFFER"
-        }
-      }
-    ],
-    // Example where the user provides a Buy Offer that references a Service Ad that does not match the seller's most recent Service Ad
-    [
-      {
-        user: "{{user1}}",
-        content: {
-          text: "I sent you a buy offer with CID bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi"
-        }
-      },
-      {
-        user: "{{user2}}",
-        content: {
-          text: "ServiceAd does not match the seller's most recent service Ad. Seller's most recent service ad can be found at bafybeibml5uieyxa5tufngvg7fgwbkwvlsuntwbxgtskoqynbt7wlchmfm",
-          action: "ACCEPT_OFFER"
-        }
-      }
     ]
   ]
 };
-async function isValidBuyOffer(buyOfferCID, runtime) {
+async function isValidBuyOffer(buyOfferCID) {
   try {
     const buyOffer = (await payAIClient.getEntryFromCID(buyOfferCID, payAIClient.buyOffersDB)).payload.value;
     const identity = buyOffer.identity;
@@ -1959,16 +2444,21 @@ var acceptOfferAction_default = acceptOfferAction;
 
 // src/actions/advertiseServicesAction.ts
 import {
-  ModelClass as ModelClass4,
-  composeContext as composeContext4,
-  elizaLogger as elizaLogger6,
-  generateText as generateText4,
+  ModelClass as ModelClass5,
+  composeContext as composeContext5,
+  elizaLogger as elizaLogger7,
+  generateText as generateText5,
   getEmbeddingZeroVector as getEmbeddingZeroVector4,
-  cleanJsonResponse as cleanJsonResponse4
+  cleanJsonResponse as cleanJsonResponse5
 } from "@elizaos/core";
 var extractServicesTemplate = `
 Analyze the following conversation to extract the services that the user wants to sell.
 There could be multiple services, so make sure you extract all of them.
+For each service, ask the user to provide any additional details that they may need from the buyer to complete the service.
+
+The conversation is below:
+
+{{recentMessages}}
 
 Return a JSON object containing only the fields where information was clearly found.
 
@@ -1979,7 +2469,8 @@ For example:
         {
             "name": "Service Name",
             "description": "Service Description",
-            "price": "Service Price"
+            "price": "Service Price",
+            "requiredInfo": "Additional Details"
         }
     ]
 }
@@ -2005,32 +2496,33 @@ var advertiseServicesAction = {
   suppressInitialMessage: true,
   validate: async (runtime, message) => {
     if (message.content.source !== "direct") {
-      elizaLogger6.debug("SELL_SERVICES action is only allowed when interacting with the direct client. This message was from:", message.content.source);
+      elizaLogger7.debug("SELL_SERVICES action is only allowed when interacting with the direct client. This message was from:", message.content.source);
       return false;
     }
     return true;
   },
   handler: async (runtime, message, state, _options, callback) => {
+    var _a;
     try {
       if (!state) {
         state = await runtime.composeState(message);
       } else {
         state = await runtime.updateRecentMessageState(state);
       }
-      const extractServicesContext = composeContext4({
+      const extractServicesContext = composeContext5({
         state,
         template: extractServicesTemplate
       });
-      const extractedServicesText = await generateText4({
+      const extractedServicesText = await generateText5({
         runtime,
         context: extractServicesContext,
-        modelClass: ModelClass4.SMALL
+        modelClass: ModelClass5.LARGE
       });
-      elizaLogger6.debug("extracted services from generateText:", extractedServicesText);
-      const extractedServices = JSON.parse(cleanJsonResponse4(extractedServicesText));
-      elizaLogger6.debug("extracted the following services from the conversation:", extractedServicesText);
+      elizaLogger7.debug("extracted services from generateText:", extractedServicesText);
+      const extractedServices = JSON.parse(cleanJsonResponse5(extractedServicesText));
+      elizaLogger7.debug("extracted the following services from the conversation:", extractedServicesText);
       if (extractedServices.success === false || extractedServices.success === "false") {
-        elizaLogger6.info("Need more information from the user to advertise services.");
+        elizaLogger7.info("Need more information from the user to advertise services.");
         if (callback) {
           callback({
             text: extractedServices.result,
@@ -2040,13 +2532,20 @@ var advertiseServicesAction = {
         }
         return false;
       }
-      const serviceAd = await prepareServiceAd(extractedServices.result, runtime);
+      const contactInfo = {
+        "libp2p": (_a = payAIClient.libp2p) == null ? void 0 : _a.peerId.toString()
+      };
+      const twitterUsername = runtime.getSetting("TWITTER_USERNAME");
+      if (twitterUsername) {
+        contactInfo["twitter"] = `@${twitterUsername}`;
+      }
+      const serviceAd = await prepareServiceAd(extractedServices.result, runtime, contactInfo);
       const CID3 = await payAIClient.publishPreparedServiceAd(serviceAd);
       let responseToUser = `Successfully advertised your services. Your Service Ad's IPFS CID is ${CID3}`;
       const servicesFilePath = payAIClient.servicesConfigPath;
-      elizaLogger6.debug("Updating the local services file with the seller's services");
+      elizaLogger7.debug("Updating the local services file with the seller's services");
       payAIClient.saveSellerServices(JSON.stringify(extractedServices.result, null, 2));
-      elizaLogger6.info("Updated services file locally at:", servicesFilePath);
+      elizaLogger7.info("Updated services file locally at:", servicesFilePath);
       if (callback) {
         const newMemory = {
           userId: message.agentId,
@@ -2060,20 +2559,13 @@ var advertiseServicesAction = {
           },
           embedding: getEmbeddingZeroVector4()
         };
+        await callback(newMemory.content);
         await runtime.messageManager.createMemory(newMemory);
-        callback(newMemory.content);
       }
       return true;
     } catch (error) {
-      elizaLogger6.error("Error in SELL_SERVICES handler:", error);
+      elizaLogger7.error("Error in SELL_SERVICES handler:", error);
       console.error(error);
-      if (callback) {
-        callback({
-          text: "Error processing SELL_SERVICES request.",
-          action: "SELL_SERVICES",
-          source: message.content.source
-        });
-      }
       return false;
     }
   },
@@ -2127,15 +2619,15 @@ var advertiseServicesAction_default = advertiseServicesAction;
 
 // src/actions/executeContractAction.ts
 import {
-  ModelClass as ModelClass5,
-  composeContext as composeContext5,
-  elizaLogger as elizaLogger7,
-  generateText as generateText5,
-  cleanJsonResponse as cleanJsonResponse5,
+  ModelClass as ModelClass6,
+  composeContext as composeContext6,
+  elizaLogger as elizaLogger8,
+  generateText as generateText6,
+  cleanJsonResponse as cleanJsonResponse6,
   getEmbeddingZeroVector as getEmbeddingZeroVector5
 } from "@elizaos/core";
 var extractAgreementCIDTemplate = `
-Analyze the following conversation to extract the CID of the Agreement from the seller.
+Analyze the following conversation to extract the ipfs CID of the Agreement from the seller.
 
 {{recentMessages}}
 
@@ -2144,23 +2636,59 @@ For example:
 {
     "success": true,
     "result": {
-        "agreementCID": "CID of the Agreement"
+        "agreementCID": "ipfs CID of the Agreement"
     }
 }
 
-If the seller did not provide the CID of the Agreement, then set the "success" field to false and set the result to a string asking the user to provide the missing information.
-For example, if you could not find the CID of the Agreement, then return:
+If the seller provided a short url instead of the ipfs CID, then you should extract the short url and put it in the "agreementCID" field.
+For example:
+{
+    "success": true,
+    "result": {
+        "agreementCID": "https://t.co/9dj1CQ98yG"
+    }
+}
+
+If the seller did not provide the ipfs CID of the Agreement or a short url, then set the "success" field to false and set the result to a string asking the user to provide the missing information.
+For example, if you could not find the ipfs CID of the Agreement, then return:
 {
     "success": false,
-    "result": "Please provide the CID of the Agreement."
+    "result": "feedback message to the user"
 }
 
 Only return a JSON markdown block.
 `;
+var successfulResponseToUserTemplate4 = `
+# About {{agentName}}
+{{bio}}
+{{lore}}
+
+# Task:
+Based on the conversation below, respond to the seller letting them know that you have funded the contract for them to start working on the service.
+You should use your own words and style. Ask the user to start working on the service.
+Don't tag the user in your response.
+The response should be 260 characters or less.
+
+
+Conversation:
+{{recentMessages}}
+
+Make sure to include the link of the transaction that funded the contract so that the seller can review.
+The link is https://solscan.io/tx/{{tx}}
+
+
+For example:
+{
+    "success": true,
+    "result": "A natural message informing the user that the contract has been funded and that they can start working now, and the solscan link to the solana transaction."
+}
+
+Return JSON markdown only.
+`;
 var executeContractAction = {
   name: "EXECUTE_CONTRACT",
-  similes: ["START_ENGAGEMENT", "BEGIN_CONTRACT", "INITIATE_CONTRACT"],
-  description: "This action allows a buyer to start the contract by sending funds to an escrow account on Solana.",
+  similes: ["START_ENGAGEMENT", "BEGIN_CONTRACT", "INITIATE_CONTRACT", "FUND_CONTRACT"],
+  description: "This action allows a buyer to start the contract by sending funds to an escrow account on Solana. The seller will start working after the funds are sent.",
   suppressInitialMessage: true,
   validate: async (runtime, message) => {
     return true;
@@ -2172,36 +2700,44 @@ var executeContractAction = {
       } else {
         state = await runtime.updateRecentMessageState(state);
       }
-      const executeContractContext = composeContext5({
+      const executeContractContext = composeContext6({
         state,
         template: extractAgreementCIDTemplate
       });
-      const extractedDetailsText = await generateText5({
+      const extractedDetailsText = await generateText6({
         runtime,
         context: executeContractContext,
-        modelClass: ModelClass5.SMALL
+        modelClass: ModelClass6.LARGE
       });
-      elizaLogger7.debug("extracted the following Agreement CID from the conversation:", extractedDetailsText);
-      const extractedDetails = JSON.parse(cleanJsonResponse5(extractedDetailsText));
-      if (extractedDetails.success === false || extractedDetails.success === "false") {
-        elizaLogger7.info("Need more information from the user to execute the contract.");
+      elizaLogger8.debug("extracted the following Agreement CID from the conversation:", extractedDetailsText);
+      const extractedDetails = JSON.parse(cleanJsonResponse6(extractedDetailsText));
+      if (extractedDetails.success === false) {
+        elizaLogger8.info("Need more information from the user to execute the contract.");
         if (callback) {
           callback({
-            text: extractedDetails.result,
+            text: `@${state.senderName} ${extractedDetails.result}`,
             action: "EXECUTE_CONTRACT",
             source: message.content.source
           });
         }
         return false;
       }
+      if (extractedDetails.result.agreementCID.includes("t.co")) {
+        const shortUrl = extractedDetails.result.agreementCID;
+        const cid = await getCIDFromShortUrl(shortUrl);
+        extractedDetails.result.agreementCID = cid;
+      }
+      if (extractedDetails.result.agreementCID.includes("ipfs.io")) {
+        const cid = await getCIDFromIpfsUrl(extractedDetails.result.agreementCID);
+        extractedDetails.result.agreementCID = cid;
+      }
       const agreement = (await payAIClient.getEntryFromCID(extractedDetails.result.agreementCID, payAIClient.agreementsDB)).payload.value;
-      ;
       const isValidAgreement = await verifyMessage(agreement.identity, agreement.signature, agreement.message);
       if (!isValidAgreement) {
-        elizaLogger7.info("Agreement signature is invalid.");
+        elizaLogger8.info("Agreement signature is invalid.");
         if (callback) {
           callback({
-            text: "Agreement signature is invalid.",
+            text: `@${state.senderName} Agreement signature is invalid.`,
             action: "EXECUTE_CONTRACT",
             source: message.content.source
           });
@@ -2209,13 +2745,12 @@ var executeContractAction = {
         return false;
       }
       const buyOffer = (await payAIClient.getEntryFromCID(agreement.message.buyOfferCID, payAIClient.buyOffersDB)).payload.value;
-      ;
       const isValidBuyOffer2 = await verifyMessage(buyOffer.identity, buyOffer.signature, buyOffer.message);
       if (!isValidBuyOffer2) {
-        elizaLogger7.info("Buy Offer signature is invalid.");
+        elizaLogger8.info("Buy Offer signature is invalid.");
         if (callback) {
           callback({
-            text: "Buy Offer signature is invalid.",
+            text: `@${state.senderName} Buy Offer signature is invalid.`,
             action: "EXECUTE_CONTRACT",
             source: message.content.source
           });
@@ -2224,10 +2759,10 @@ var executeContractAction = {
       }
       const base58PublicKey = await getBase58PublicKey(runtime);
       if (buyOffer.identity !== base58PublicKey) {
-        elizaLogger7.info("The Buy Offer that this Agreement references was not signed by my keypair.");
+        elizaLogger8.info("The Buy Offer that this Agreement references was not signed by my keypair.");
         if (callback) {
           callback({
-            text: "Buy Offer was not signed by my keypair.",
+            text: `@${state.senderName} Buy Offer was not signed by my keypair.`,
             action: "EXECUTE_CONTRACT",
             source: message.content.source
           });
@@ -2246,35 +2781,39 @@ var executeContractAction = {
       const lamportsPerSOL = 1e9;
       const totalLamports = Math.round(totalSOL * lamportsPerSOL).toString();
       const tx = await paymentClient.startContract(extractedDetails.result.agreementCID, agreement.identity, totalLamports);
-      let responseToUser = `Successfully started the contract. You can see the transaction at https://solscan.io/tx/${tx}`;
+      state.tx = tx;
+      const successfulResponseToUserContext = composeContext6({
+        state,
+        template: successfulResponseToUserTemplate4
+      });
+      const successfulResponseToUserText = await generateText6({
+        runtime,
+        context: successfulResponseToUserContext,
+        modelClass: ModelClass6.LARGE
+      });
+      const successfulResponseToUser = JSON.parse(cleanJsonResponse6(successfulResponseToUserText));
+      elizaLogger8.debug("Successful response to user:", successfulResponseToUser.result);
       if (callback) {
         const newMemory = {
           userId: message.agentId,
           agentId: message.agentId,
           roomId: message.roomId,
           content: {
-            text: responseToUser,
+            text: `@${state.senderName} ${successfulResponseToUser.result}`,
             action: "EXECUTE_CONTRACT",
             source: message.content.source,
             agreement: extractedDetails.result.agreementCID
           },
           embedding: getEmbeddingZeroVector5()
         };
+        await callback(newMemory.content);
         await runtime.messageManager.createMemory(newMemory);
-        callback(newMemory.content);
       }
       await payAIClient.fundedContractsDB.add(tx.toString());
       return true;
     } catch (error) {
-      elizaLogger7.error("Error in EXECUTE_CONTRACT handler:", error);
+      elizaLogger8.error("Error in EXECUTE_CONTRACT handler:", error);
       console.error(error);
-      if (callback) {
-        callback({
-          text: "Error processing EXECUTE_CONTRACT request.",
-          action: "EXECUTE_CONTRACT",
-          source: message.content.source
-        });
-      }
       return false;
     }
   },
@@ -2283,13 +2822,13 @@ var executeContractAction = {
       {
         user: "{{user1}}",
         content: {
-          text: "I have signed an agreement with CID bafybeihdwdcojee6xedzdetojuzjevtenxquvykuefgh4dqkjv67uzcmw7"
+          text: "I'm thrilled to let you know that I've accepted your offer You can review the agreement here: https://t.co/hEdbwgNnWS. Looking forward to collaborating on this project!"
         }
       },
       {
         user: "{{user2}}",
         content: {
-          text: "Great! I checked it out and everything looks good. I just started the contract. You can see the transaction here: https://solscan.io/tx/4vxNhiUKsUpYkJg42WBVA7wLacZwu2MT5ur8ETfpfrZHQuYFTdbu8PHSmAg1ft283LykP3RyLMEFWktzLCvzAjX3"
+          text: "Great! I checked it out and everything looks good. I just funded the contract. You can see the transaction here: https://solscan.io/tx/4vxNhiUKsUpYkJg42WBVA7wLacZwu2MT5ur8ETfpfrZHQuYFTdbu8PHSmAg1ft283LykP3RyLMEFWktzLCvzAjX3"
         }
       }
     ],
@@ -2297,41 +2836,27 @@ var executeContractAction = {
       {
         user: "{{user1}}",
         content: {
-          text: "I have signed an agreement with CID bafybeihdwdcojee6xedzdetojuzjevtenxquvykuefgh4dqkjv67uzcmw7"
+          text: "I'm thrilled to let you know that I've accepted your offer You can review the agreement here: https://t.co/dxtzIbMN24. Looking forward to collaborating on this project!"
+        }
+      },
+      {
+        user: "{{user2}}",
+        content: {
+          text: "Great! I checked it out and everything looks good. I just funded the contract. You can see the transaction here: https://solscan.io/tx/4vxNhiUKsUpYkJg42WBVA7wLacZwu2MT5ur8ETfpfrZHQuYFTdbu8PHSmAg1ft283LykP3RyLMEFWktzLCvzAjX3"
+        }
+      }
+    ],
+    [
+      {
+        user: "{{user1}}",
+        content: {
+          text: "I'm thrilled to let you know that I've accepted your offer You can review the agreement here: https://t.co/dxtzIbMN24. Looking forward to collaborating on this project!"
         }
       },
       {
         user: "{{user2}}",
         content: {
           text: "I could not find anything with that CID. Please double check and provide it again."
-        }
-      }
-    ],
-    [
-      {
-        user: "{{user1}}",
-        content: {
-          text: "I have signed an agreement with CID bafybeihdwdcojee6xedzdetojuzjevtenxquvykuefgh4dqkjv67uzcmw7"
-        }
-      },
-      {
-        user: "{{user2}}",
-        content: {
-          text: "Agreement signature is invalid."
-        }
-      }
-    ],
-    [
-      {
-        user: "{{user1}}",
-        content: {
-          text: "I have signed an agreement with CID bafybeihdwdcojee6xedzdetojuzjevtenxquvykuefgh4dqkjv67uzcmw7"
-        }
-      },
-      {
-        user: "{{user2}}",
-        content: {
-          text: "The signature of the Buy Offer that this Agreement references is invalid."
         }
       }
     ]
@@ -2341,15 +2866,15 @@ var executeContractAction_default = executeContractAction;
 
 // src/actions/startWork.ts
 import {
-  ModelClass as ModelClass6,
-  composeContext as composeContext6,
-  elizaLogger as elizaLogger8,
-  generateText as generateText6,
-  cleanJsonResponse as cleanJsonResponse6,
+  ModelClass as ModelClass7,
+  composeContext as composeContext7,
+  elizaLogger as elizaLogger9,
+  generateText as generateText7,
+  cleanJsonResponse as cleanJsonResponse7,
   getEmbeddingZeroVector as getEmbeddingZeroVector6
 } from "@elizaos/core";
 var extractTransactionSignatureTemplate = `
-Analyze the following conversation to extract the transaction signature of the contract.
+Analyze the following conversation to extract the transaction signature of the contract that funded the work.
 
 {{recentMessages}}
 
@@ -2362,6 +2887,15 @@ For example:
     }
 }
 
+If the user provided a short url instead of the transaction signature, then you should extract the short url and put it in a field "shortUrl".
+For example:
+{
+    "success": true,
+    "result": {
+        "shortUrl": "https://t.co/9dj1CQ98yG"
+    }
+}
+
 If the user did not provide the transaction signature, then set the "success" field to false and set the result to a string asking the user to provide the missing information.
 For example, if you could not find the transaction signature, then return:
 {
@@ -2370,6 +2904,29 @@ For example, if you could not find the transaction signature, then return:
 }
 
 Only return a JSON markdown block.
+`;
+var successfulResponseToUserTemplate5 = `
+# About {{agentName}}
+{{bio}}
+{{lore}}
+
+# Task:
+Based on the conversation below, respond to the buyer thanking them for funding the contract and letting them know that you have started working the job.
+Let them know that you will follow up with them once the work is complete.
+You should use your own words and style.
+The response should be 260 characters or less.
+
+Conversation:
+{{recentMessages}}
+
+
+For example:
+{
+    "success": true,
+    "result": "A natural message thanking the buyer for funding the contract and letting them know that you have started working the job."
+}
+
+Return JSON markdown only.
 `;
 var startWorkAction = {
   name: "START_WORK",
@@ -2386,18 +2943,18 @@ var startWorkAction = {
       } else {
         state = await runtime.updateRecentMessageState(state);
       }
-      const startWorkContext = composeContext6({
+      const startWorkContext = composeContext7({
         state,
         template: extractTransactionSignatureTemplate
       });
-      const extractedDetailsText = await generateText6({
+      const extractedDetailsText = await generateText7({
         runtime,
         context: startWorkContext,
-        modelClass: ModelClass6.SMALL
+        modelClass: ModelClass7.LARGE
       });
-      const extractedDetails = JSON.parse(cleanJsonResponse6(extractedDetailsText));
+      const extractedDetails = JSON.parse(cleanJsonResponse7(extractedDetailsText));
       if (extractedDetails.success === false) {
-        elizaLogger8.info("Need more information from the user to start work.");
+        elizaLogger9.info("Need more information from the user to start work.");
         if (callback) {
           callback({
             text: extractedDetails.result,
@@ -2407,9 +2964,14 @@ var startWorkAction = {
         }
         return false;
       }
+      if (extractedDetails.result.shortUrl) {
+        const shortUrl = extractedDetails.result.shortUrl;
+        const transactionSignature = await getTxFromShortUrl(shortUrl);
+        extractedDetails.result.transactionSignature = transactionSignature;
+      }
       const contractAccount = await paymentClient.getContractAccountFromTransaction(extractedDetails.result.transactionSignature);
       if (!contractAccount) {
-        elizaLogger8.info("Could not find the contract account from the given transaction.");
+        elizaLogger9.info("Could not find the contract account from the given transaction.");
         if (callback) {
           callback({
             text: "Could not find the contract account from the given transaction. Please verify the transaction signature.",
@@ -2423,7 +2985,7 @@ var startWorkAction = {
       const agreement = (await payAIClient.getEntryFromCID(contractAccountData.cid, payAIClient.agreementsDB)).payload.value;
       const isValidAgreement = await verifyMessage(agreement.identity, agreement.signature, agreement.message);
       if (!isValidAgreement) {
-        elizaLogger8.info("Agreement signature is invalid.");
+        elizaLogger9.info("Agreement signature is invalid.");
         if (callback) {
           callback({
             text: "Agreement signature is invalid.",
@@ -2435,7 +2997,7 @@ var startWorkAction = {
       }
       const base58PublicKey = await getBase58PublicKey(runtime);
       if (agreement.identity !== base58PublicKey) {
-        elizaLogger8.info("The Agreement was not signed by my keypair.");
+        elizaLogger9.info("The Agreement was not signed by my keypair.");
         if (callback) {
           callback({
             text: "Agreement was not signed by my keypair.",
@@ -2448,7 +3010,7 @@ var startWorkAction = {
       const buyOffer = (await payAIClient.getEntryFromCID(agreement.message.buyOfferCID, payAIClient.buyOffersDB)).payload.value;
       const isValidBuyOffer2 = await verifyMessage(buyOffer.identity, buyOffer.signature, buyOffer.message);
       if (!isValidBuyOffer2) {
-        elizaLogger8.info("Buy Offer signature is invalid.");
+        elizaLogger9.info("Buy Offer signature is invalid.");
         if (callback) {
           callback({
             text: "Buy Offer signature is invalid.",
@@ -2460,7 +3022,7 @@ var startWorkAction = {
       }
       const serviceAd = (await payAIClient.getEntryFromCID(buyOffer.message.serviceAdCID, payAIClient.serviceAdsDB)).payload.value;
       if (contractAccountData.seller.toString() !== serviceAd.message.wallet) {
-        elizaLogger8.info("The seller's address in the contract does not match the wallet address of the service advertisement.");
+        elizaLogger9.info("The seller's address in the contract does not match the wallet address of the service advertisement.");
         if (callback) {
           callback({
             text: `The seller's address in the contract (${contractAccountData.seller.toString()}) does not match the wallet address of the service advertisement (${serviceAd.message.wallet}).`,
@@ -2472,7 +3034,7 @@ var startWorkAction = {
       }
       const isValidServiceAd = await verifyMessage(serviceAd.identity, serviceAd.signature, serviceAd.message);
       if (!isValidServiceAd) {
-        elizaLogger8.info("Service Advertisement signature is invalid.");
+        elizaLogger9.info("Service Advertisement signature is invalid.");
         if (callback) {
           callback({
             text: "Service Advertisement signature is invalid.",
@@ -2483,7 +3045,7 @@ var startWorkAction = {
         return false;
       }
       if (serviceAd.identity !== base58PublicKey) {
-        elizaLogger8.info("The Service Advertisement was not signed by my keypair.");
+        elizaLogger9.info("The Service Advertisement was not signed by my keypair.");
         if (callback) {
           callback({
             text: "Service Advertisement was not signed by my keypair.",
@@ -2504,7 +3066,7 @@ var startWorkAction = {
       const lamportsPerSOL = 1e9;
       const totalLamports = Math.round(totalSOL * lamportsPerSOL).toString();
       if (contractAccountData.amount.toString() !== totalLamports) {
-        elizaLogger8.info("Contract amount does not match expected amount.");
+        elizaLogger9.info("Contract amount does not match expected amount.");
         if (callback) {
           callback({
             text: `Contract amount (${contractAccountData.amount.toString()}) does not match expected amount (${totalLamports}).`,
@@ -2514,25 +3076,70 @@ var startWorkAction = {
         }
         return false;
       }
-      let responseToUser = `Thanks for starting the contract. I will start work now!`;
+      const contractAddress = contractAccount.address.toString();
+      let jobs = await runtime.cacheManager.get(`${message.agentId}-payai-contracts`);
+      if (jobs === void 0) {
+        jobs = {};
+      }
+      jobs[contractAddress] = contractAddress;
+      await runtime.cacheManager.set(`${runtime.agentId}-payai-contracts`, jobs);
+      const jobsFromCache = await runtime.cacheManager.get(`${runtime.agentId}-payai-contracts`);
+      const jobDetails = {
+        agreementCID: contractAccountData.cid,
+        agreement: agreement.message,
+        buyOfferCID: agreement.message.buyOfferCID,
+        buyOffer: buyOffer.message,
+        serviceAdCID: buyOffer.message.serviceAdCID,
+        serviceAd: serviceAd.message,
+        contractAddress: contractAccount.address,
+        contractFundedAmount: totalLamports,
+        contractBuyer: contractAccountData.buyer.toString(),
+        contractSeller: contractAccountData.seller.toString(),
+        contactInfo: {
+          client: state.recentMessagesData[0].content.source || message.content.source,
+          roomId: state.recentMessagesData[0].roomId || message.roomId,
+          handle: state.senderName || message.senderName,
+          conversationId: state.recentMessagesData[0].content.url || message.content.url
+        },
+        elizaMessage: {
+          userId: message.userId,
+          agentId: message.agentId,
+          roomId: message.roomId,
+          content: message.content
+        },
+        status: "NOT_STARTED"
+      };
+      const cacheKey = `${runtime.agentId}-payai-job-details-contract-${contractAccount.address}`;
+      await runtime.cacheManager.set(cacheKey, jobDetails);
+      const successfulResponseToUserContext = composeContext7({
+        state,
+        template: successfulResponseToUserTemplate5
+      });
+      const successfulResponseToUserText = await generateText7({
+        runtime,
+        context: successfulResponseToUserContext,
+        modelClass: ModelClass7.LARGE
+      });
+      const successfulResponseToUser = JSON.parse(cleanJsonResponse7(successfulResponseToUserText));
+      elizaLogger9.debug("Successful response to user:", successfulResponseToUser.result);
       if (callback) {
         const newMemory = {
           userId: message.agentId,
           agentId: message.agentId,
           roomId: message.roomId,
           content: {
-            text: responseToUser,
+            text: `@${state.senderName} ${successfulResponseToUser.result}`,
             action: "START_WORK",
             source: message.content.source
           },
           embedding: getEmbeddingZeroVector6()
         };
+        await callback(newMemory.content);
         await runtime.messageManager.createMemory(newMemory);
-        callback(newMemory.content);
       }
       return true;
     } catch (error) {
-      elizaLogger8.error("Error in START_WORK handler:", error);
+      elizaLogger9.error("Error in START_WORK handler:", error);
       console.error(error);
       return false;
     }
@@ -2598,14 +3205,447 @@ var startWorkAction = {
 };
 var startWork_default = startWorkAction;
 
+// src/actions/reviewWork.ts
+import {
+  ModelClass as ModelClass8,
+  composeContext as composeContext8,
+  elizaLogger as elizaLogger10,
+  generateText as generateText8,
+  cleanJsonResponse as cleanJsonResponse8,
+  getEmbeddingZeroVector as getEmbeddingZeroVector7
+} from "@elizaos/core";
+var extractDeliveredWorkTemplate = `
+Analyze the following conversation to extract a link of the work that the seller has delivered.
+I need to review the work before I can release the funds to the seller.
+
+{{recentMessages}}
+
+Return a JSON object containing only the fields where information was clearly found.
+For example:
+{
+    "success": true,
+    "result": {
+        "deliveredWorkLink": "link containing the delivered work to be reviewed"
+    }
+}
+
+If the user did not provide the delivery link, then set the "success" field to false and set the result to a string asking the user to provide the missing information.
+For example, if you could not find the delivery link, then return:
+{
+    "success": false,
+    "result": "Please provide a link of your work."
+}
+
+Only return a JSON markdown block.
+`;
+var extractTransactionLinkTemplate = `
+Analyze the following conversation to extract the link of the transaction that funded the contract.
+
+{{recentMessages}}
+
+Return a JSON object containing only the fields where information was clearly found.
+For example:
+{
+    "success": true,
+    "result": {
+        "transactionLink": "link to the transaction that funded the contract"
+    }
+}
+
+If you cannot find the transaction link in the conversation, then set the "success" field to false and set the result to a string asking the user to provide the missing information.
+For example, if you could not find the transaction link, then return:
+{
+    "success": false,
+    "result": "A natural message asking the user to provide the transaction link of the contract execution that funded the work."
+}
+
+Only return a JSON markdown block.
+`;
+var reviewWorkTemplate = `
+You are the buyer in a contract with a seller.
+You have received the work that the seller has delivered.
+You need to review the work to determine if the seller has delivered the work as promised in the contract.
+
+Here is the work that the seller has delivered:
+
+{{deliveredWorkText}}
+
+Here is the seller's advertised service:
+
+{{serviceAdText}}
+
+Based on the work and the service advertisement, please determine if the delivered work is satisfactory.
+
+Return a JSON object containing your assessment.
+For example:
+{
+    "success": true,
+    "result": {
+        "satisfactory": true
+    }
+}
+
+If the work is not satisfactory, then set the "success" field to false, and set the "result" field to a string explaining why the work is not satisfactory.
+For example, if the work is not satisfactory, then return:
+{
+    "success": false,
+    "result": "the reason goes here"
+}
+
+Only return a JSON markdown block.
+`;
+var successfulResponseToUserTemplate6 = `
+# About {{agentName}}
+{{bio}}
+{{lore}}
+
+# Task:
+Based on the conversation below, respond to the seller thanking them for delivering the work, and letting them know that you have reviewed the work and that everything looks good.
+Let them know that you released the payment from escrow to their wallet in transaction https://solscan.io/tx/{{tx}}.
+You should use your own words and style.
+The response should be 260 characters or less.
+Conversation:
+{{recentMessages}}
+
+For example:
+{
+    "success": true,
+    "result": "A natural message thanking the seller for delivering the work, and letting them know that you have reviewed the work and that everything looks good. Letting them know that you released the payment from escrow to their wallet in transaction https://solscan.io/tx/{{tx}}."
+}
+
+Return JSON markdown only.
+`;
+var reviewWorkAction = {
+  name: "REVIEW_WORK",
+  similes: ["REVIEW_DELIVERY", "REVIEW_DELIVERED_WORK", "CHECK_WORK", "CHECK_DELIVERED_WORK", "RELEASE_FUNDS", "PAY_SELLER"],
+  description: "This action is used to review the work that the seller has delivered, and release the funds to the seller if the work is satisfactory.",
+  suppressInitialMessage: true,
+  validate: async (runtime, message) => {
+    return true;
+  },
+  handler: async (runtime, message, state, _options, callback) => {
+    var _a;
+    try {
+      if (!state) {
+        state = await runtime.composeState(message);
+      } else {
+        state = await runtime.updateRecentMessageState(state);
+      }
+      console.log("REVIEW_WORK message: ");
+      console.dir(message, { depth: null });
+      console.log("REVIEW_WORK state: ");
+      console.dir(state, { depth: null });
+      const transactionLinkContext = composeContext8({
+        state,
+        template: extractTransactionLinkTemplate
+      });
+      const extractedTransactionLinkText = await generateText8({
+        runtime,
+        context: transactionLinkContext,
+        modelClass: ModelClass8.LARGE
+      });
+      const extractedTransactionLink = JSON.parse(cleanJsonResponse8(extractedTransactionLinkText));
+      if (extractedTransactionLink.success === false) {
+        elizaLogger10.info("Need more information from the user to review the work.", extractedTransactionLink.result);
+        if (callback) {
+          callback({
+            text: `@${state.senderName} ${extractedTransactionLink.result}`,
+            action: "REVIEW_WORK",
+            source: message.content.source
+          });
+        }
+        return false;
+      }
+      if (extractedTransactionLink.result.transactionLink.includes("t.co")) {
+        const tx2 = await getTxFromShortUrl(extractedTransactionLink.result.transactionLink);
+        extractedTransactionLink.result.transactionLink = tx2;
+      }
+      if (extractedTransactionLink.result.transactionLink.includes("solscan.io")) {
+        const tx2 = await getTxFromSolscanUrl(extractedTransactionLink.result.transactionLink);
+        extractedTransactionLink.result.transactionLink = tx2;
+      }
+      const validationResult = await validateContract(
+        runtime,
+        extractedTransactionLink.result.transactionLink,
+        callback,
+        message
+      );
+      if (!validationResult || !validationResult.success) {
+        return false;
+      }
+      console.log("VALIDATION RESULT: ");
+      console.dir(validationResult, { depth: null });
+      const extractDeliveredWorkContext = composeContext8({
+        state,
+        template: extractDeliveredWorkTemplate
+      });
+      const extractedDeliveredWorkText = await generateText8({
+        runtime,
+        context: extractDeliveredWorkContext,
+        modelClass: ModelClass8.LARGE
+      });
+      const extractedDetails = JSON.parse(cleanJsonResponse8(extractedDeliveredWorkText));
+      if (extractedDetails.success === false) {
+        elizaLogger10.info("Need more information from the user to review the work. ", extractedDetails.result);
+        if (callback) {
+          callback({
+            text: `@${state.senderName} ${extractedDetails.result}`
+          });
+        }
+        return false;
+      }
+      const shortUrl = extractedDetails.result.deliveredWorkLink;
+      const fullUrl = await getFullUrl(shortUrl);
+      const twitterClient = await getTwitterClientFromRuntime(runtime);
+      const { conversationId, username } = getConversationIdAndUsername(fullUrl);
+      const rootTweet = await twitterClient.client.getTweet(conversationId);
+      const query = `conversation_id:${conversationId} from:${username}`;
+      const threadTweets = await twitterClient.client.fetchSearchTweets(query, 100);
+      let sortedTweets = [rootTweet];
+      threadTweets.tweets.sort((a, b) => a.id - b.id);
+      sortedTweets.push(...threadTweets.tweets);
+      let tweetText = "";
+      for (const tweet of sortedTweets) {
+        tweetText += tweet.text + "\n\n";
+      }
+      const desiredServiceID = parseInt(validationResult.buyOffer.message.desiredServiceID);
+      const serviceAdDescription = (_a = validationResult.serviceAd.message.services.find((service) => service.id === desiredServiceID)) == null ? void 0 : _a.description;
+      state.deliveredWorkText = tweetText;
+      state.serviceAdText = serviceAdDescription;
+      const reviewWorkContext = composeContext8({
+        state,
+        template: reviewWorkTemplate
+      });
+      const reviewWorkText = await generateText8({
+        runtime,
+        context: reviewWorkContext,
+        modelClass: ModelClass8.LARGE
+      });
+      const reviewWorkResult = JSON.parse(cleanJsonResponse8(reviewWorkText));
+      if (reviewWorkResult.success === false) {
+        elizaLogger10.info("The work is not satisfactory. ", reviewWorkResult.result);
+        if (callback) {
+          callback({
+            text: `@${state.senderName} ${reviewWorkResult.result}`,
+            action: "REVIEW_WORK",
+            source: message.content.source
+          });
+        }
+        return false;
+      }
+      const contractAccountAddress = validationResult.contractAccount.address;
+      const seller = validationResult.contractAccount.data.seller.toString();
+      const tx = await paymentClient.releasePayment(contractAccountAddress, seller);
+      state.tx = tx;
+      const successfulResponseToUserContext = composeContext8({
+        state,
+        template: successfulResponseToUserTemplate6
+      });
+      const successfulResponseToUserText = await generateText8({
+        runtime,
+        context: successfulResponseToUserContext,
+        modelClass: ModelClass8.LARGE
+      });
+      const successfulResponseToUser = JSON.parse(cleanJsonResponse8(successfulResponseToUserText));
+      elizaLogger10.debug("Successful response to user:", successfulResponseToUser.result);
+      if (callback) {
+        const newMemory = {
+          userId: message.userId,
+          agentId: message.agentId,
+          roomId: message.roomId,
+          content: {
+            text: `@${state.senderName} ${successfulResponseToUser.result}`,
+            action: "REVIEW_WORK",
+            source: message.content.source
+          },
+          embedding: getEmbeddingZeroVector7()
+        };
+        await callback(newMemory.content);
+        await runtime.messageManager.createMemory(newMemory);
+      }
+      return true;
+    } catch (error) {
+      elizaLogger10.error("Error in REVIEW_WORK handler:", error);
+      console.error(error);
+      return false;
+    }
+  },
+  examples: [
+    [
+      {
+        user: "{{user1}}",
+        content: {
+          text: "I finished working on our contract. Here is the link to the work: https://t.co/9dj1CQ98yG"
+        }
+      },
+      {
+        user: "{{user2}}",
+        content: {
+          text: "Thanks for sending, I will review the work now and release the funds to you if it is satisfactory."
+        }
+      }
+    ],
+    [
+      {
+        user: "{{user1}}",
+        content: {
+          text: "I finished working on our contract. Here is the link to the work: https://t.co/9dj1CQ98yG"
+        }
+      },
+      {
+        user: "{{user2}}",
+        content: {
+          text: "Thanks! I just reviewed the work and everything looks good. I released the payment to you in transaction https://solscan.io/tx/4vxNhiUKsUpYkJg42WBVA7wLacZwu2MT5ur8ETfpfrZHQuYFTdbu8PHSmAg1ft283LykP3RyLMEFWktzLCvzAjX3. Feel free to check it out."
+        }
+      }
+    ],
+    [
+      {
+        user: "{{user1}}",
+        content: {
+          text: "I finished working on our contract. Here is the link to the work: https://t.co/9dj1CQ98yG"
+        }
+      },
+      {
+        user: "{{user2}}",
+        content: {
+          text: "The contract that you mentioned was not funded by me. Please verify the transaction signature and send it to me again."
+        }
+      }
+    ]
+  ]
+};
+async function validateContract(runtime, transactionSignature, callback, message) {
+  const contractAccount = await paymentClient.getContractAccountFromTransaction(transactionSignature);
+  if (!contractAccount) {
+    elizaLogger10.info("Could not find the contract account from the given transaction.");
+    if (callback) {
+      callback({
+        text: "Could not find the contract account from the given transaction. Please verify the transaction signature.",
+        action: "START_WORK",
+        source: message.content.source
+      });
+    }
+    return false;
+  }
+  const contractAccountData = contractAccount.data;
+  const paymentReleased = contractAccountData.isReleased;
+  if (paymentReleased) {
+    elizaLogger10.info("The payment has already been released for contract account: ", contractAccount.address);
+    if (callback) {
+      callback({
+        text: `The payment has already been released for contract account: ${contractAccount.address}. Please check the contract on https://solscan.io/account/${contractAccount.address} to verify the payment.`,
+        action: "REVIEW_WORK",
+        source: message.content.source
+      });
+    }
+    return false;
+  }
+  const agreement = (await payAIClient.getEntryFromCID(contractAccountData.cid, payAIClient.agreementsDB)).payload.value;
+  const isValidAgreement = await verifyMessage(agreement.identity, agreement.signature, agreement.message);
+  if (!isValidAgreement) {
+    elizaLogger10.info("Agreement signature is invalid.");
+    if (callback) {
+      callback({
+        text: "Agreement signature is invalid.",
+        action: "START_WORK",
+        source: message.content.source
+      });
+    }
+    return false;
+  }
+  const base58PublicKey = await getBase58PublicKey(runtime);
+  if (agreement.identity !== contractAccountData.seller.toString()) {
+    elizaLogger10.info("The Agreement was not signed by the seller's wallet address.");
+    if (callback) {
+      callback({
+        text: "Agreement was not signed by the seller's wallet address.",
+        action: "START_WORK",
+        source: message.content.source
+      });
+    }
+    return false;
+  }
+  const buyOffer = (await payAIClient.getEntryFromCID(agreement.message.buyOfferCID, payAIClient.buyOffersDB)).payload.value;
+  const isValidBuyOffer2 = await verifyMessage(buyOffer.identity, buyOffer.signature, buyOffer.message);
+  if (!isValidBuyOffer2) {
+    elizaLogger10.info("Buy Offer signature is invalid.");
+    if (callback) {
+      callback({
+        text: "Buy Offer signature is invalid.",
+        action: "START_WORK",
+        source: message.content.source
+      });
+    }
+    return false;
+  }
+  if (buyOffer.identity !== base58PublicKey) {
+    elizaLogger10.info("The Buy Offer was not signed by my keypair.");
+    if (callback) {
+      callback({
+        text: "Buy Offer was not signed by my keypair.",
+        action: "START_WORK",
+        source: message.content.source
+      });
+    }
+    return false;
+  }
+  const serviceAd = (await payAIClient.getEntryFromCID(buyOffer.message.serviceAdCID, payAIClient.serviceAdsDB)).payload.value;
+  if (contractAccountData.seller.toString() !== serviceAd.message.wallet) {
+    elizaLogger10.info("The seller's address in the contract does not match the wallet address of the service advertisement.");
+    if (callback) {
+      callback({
+        text: `The seller's address in the contract (${contractAccountData.seller.toString()}) does not match the wallet address of the service advertisement (${serviceAd.message.wallet}).`,
+        action: "START_WORK",
+        source: message.content.source
+      });
+    }
+    return false;
+  }
+  const isValidServiceAd = await verifyMessage(serviceAd.identity, serviceAd.signature, serviceAd.message);
+  if (!isValidServiceAd) {
+    elizaLogger10.info("Service Advertisement signature is invalid.");
+    if (callback) {
+      callback({
+        text: "Service Advertisement signature is invalid.",
+        action: "START_WORK",
+        source: message.content.source
+      });
+    }
+    return false;
+  }
+  return {
+    success: true,
+    contractAccount,
+    agreement,
+    buyOffer,
+    serviceAd
+  };
+}
+function getConversationIdAndUsername(fullUrl) {
+  const url = new URL(fullUrl);
+  const conversationId = url.pathname.split("/")[3];
+  const username = url.pathname.split("/")[1];
+  return { conversationId, username };
+}
+var reviewWork_default = reviewWorkAction;
+
 // src/index.ts
 var payaiPlugin = {
   name: "payai",
   description: "Agents can hire other agents for their services. Agents can make money by selling their services.",
-  actions: [browseAgents_default, makeOfferAction_default, acceptOfferAction_default, advertiseServicesAction_default, executeContractAction_default, startWork_default],
+  actions: [
+    advertiseServicesAction_default,
+    browseAgents_default,
+    makeOfferAction_default,
+    acceptOfferAction_default,
+    executeContractAction_default,
+    startWork_default,
+    reviewWork_default
+  ],
   evaluators: [],
   providers: [],
-  services: [],
+  services: [payAIJobManagerService],
   clients: [payAIClient]
 };
 var index_default = payaiPlugin;

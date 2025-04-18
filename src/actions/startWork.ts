@@ -13,14 +13,15 @@ import {
 } from '@elizaos/core';
 import { payAIClient } from '../clients/client.ts';
 import { paymentClient } from '../payment.ts';
-import { verifyMessage, getBase58PublicKey } from '../utils.ts';
+import { verifyMessage, getBase58PublicKey, getTxFromShortUrl } from '../utils.ts';
+import { JobDetails } from '../types.ts';
 
 interface ContractDetails {
     transactionSignature: string;
 }
 
 const extractTransactionSignatureTemplate = `
-Analyze the following conversation to extract the transaction signature of the contract.
+Analyze the following conversation to extract the transaction signature of the contract that funded the work.
 
 {{recentMessages}}
 
@@ -33,6 +34,15 @@ For example:
     }
 }
 
+If the user provided a short url instead of the transaction signature, then you should extract the short url and put it in a field "shortUrl".
+For example:
+{
+    "success": true,
+    "result": {
+        "shortUrl": "https://t.co/9dj1CQ98yG"
+    }
+}
+
 If the user did not provide the transaction signature, then set the "success" field to false and set the result to a string asking the user to provide the missing information.
 For example, if you could not find the transaction signature, then return:
 {
@@ -42,6 +52,31 @@ For example, if you could not find the transaction signature, then return:
 
 Only return a JSON markdown block.
 `;
+
+const successfulResponseToUserTemplate = `
+# About {{agentName}}
+{{bio}}
+{{lore}}
+
+# Task:
+Based on the conversation below, respond to the buyer thanking them for funding the contract and letting them know that you have started working the job.
+Let them know that you will follow up with them once the work is complete.
+You should use your own words and style.
+The response should be 260 characters or less.
+
+Conversation:
+{{recentMessages}}
+
+
+For example:
+{
+    "success": true,
+    "result": "A natural message thanking the buyer for funding the contract and letting them know that you have started working the job."
+}
+
+Return JSON markdown only.
+`;
+
 
 const startWorkAction: Action = {
     name: "START_WORK",
@@ -74,7 +109,7 @@ const startWorkAction: Action = {
             const extractedDetailsText = await generateText({
                 runtime,
                 context: startWorkContext,
-                modelClass: ModelClass.SMALL,
+                modelClass: ModelClass.LARGE,
             });
 
             const extractedDetails = JSON.parse(cleanJsonResponse(extractedDetailsText));
@@ -90,6 +125,13 @@ const startWorkAction: Action = {
                     });
                 }
                 return false;
+            }
+
+            // if the user provided a short url, then follow the short url to get the transaction signature
+            if (extractedDetails.result.shortUrl) {
+                const shortUrl = extractedDetails.result.shortUrl;
+                const transactionSignature = await getTxFromShortUrl(shortUrl);
+                extractedDetails.result.transactionSignature = transactionSignature;
             }
 
             // get the contract account from the transaction
@@ -222,8 +264,63 @@ const startWorkAction: Action = {
                 return false;
             }
 
-            let responseToUser = `Thanks for starting the contract. I will start work now!`;
+            // add the contract to the agent's current jobs
+            const contractAddress = contractAccount.address.toString();
+            let jobs: { [key: string]: string } = await runtime.cacheManager.get(`${message.agentId}-payai-contracts`);
+            if (jobs === undefined) {
+                jobs = {};
+            }
+            jobs[contractAddress] = contractAddress;
+            await runtime.cacheManager.set(`${runtime.agentId}-payai-contracts`, jobs);
+            
+            // for debugging purposes, get the cache and log it
+            const jobsFromCache = await runtime.cacheManager.get(`${runtime.agentId}-payai-contracts`);
+            
+            // store details about the contract in the agent's cache/db
+            // which will later be used to start work and deliver work
+            const jobDetails: JobDetails = {
+                agreementCID: contractAccountData.cid,
+                agreement: agreement.message,
+                buyOfferCID: agreement.message.buyOfferCID,
+                buyOffer: buyOffer.message,
+                serviceAdCID: buyOffer.message.serviceAdCID,
+                serviceAd: serviceAd.message,
+                contractAddress: contractAccount.address,
+                contractFundedAmount: totalLamports,
+                contractBuyer: contractAccountData.buyer.toString(),
+                contractSeller: contractAccountData.seller.toString(),
+                contactInfo: {
+                    client: state.recentMessagesData[0].content.source || message.content.source,
+                    roomId: state.recentMessagesData[0].roomId || message.roomId,
+                    handle: state.senderName || message.senderName,
+                    conversationId: state.recentMessagesData[0].content.url || message.content.url,
+                },
+                elizaMessage: {
+                    userId: message.userId,
+                    agentId: message.agentId,
+                    roomId: message.roomId,
+                    content: message.content,
+                },
+                status: "NOT_STARTED",
+            };
+            const cacheKey = `${runtime.agentId}-payai-job-details-contract-${contractAccount.address}`;
+            await runtime.cacheManager.set(cacheKey, jobDetails);
 
+            // send message to the user
+            const successfulResponseToUserContext = composeContext({
+                state,
+                template: successfulResponseToUserTemplate,
+            });
+
+            const successfulResponseToUserText = await generateText({
+                runtime,
+                context: successfulResponseToUserContext,
+                modelClass: ModelClass.LARGE,
+            });
+
+            const successfulResponseToUser = JSON.parse(cleanJsonResponse(successfulResponseToUserText));
+            elizaLogger.debug("Successful response to user:", successfulResponseToUser.result);
+            
             if (callback) {
                 // create new memory of the message to the user
                 const newMemory: Memory = {
@@ -231,16 +328,16 @@ const startWorkAction: Action = {
                     agentId: message.agentId,
                     roomId: message.roomId,
                     content: {
-                        text: responseToUser,
+                        text: `@${state.senderName} ${successfulResponseToUser.result}`,
                         action: "START_WORK",
                         source: message.content.source,
                     },
                     embedding: getEmbeddingZeroVector()
                 };
-                await runtime.messageManager.createMemory(newMemory);
-
                 // send message to the user
-                callback(newMemory.content);
+                await callback(newMemory.content);
+
+                await runtime.messageManager.createMemory(newMemory);
             }
 
             return true;

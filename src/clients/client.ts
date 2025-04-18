@@ -17,7 +17,8 @@ import {
   prepareServiceAd,
   getAllDbEntriesWithCIDs,
   getBase58PublicKey,
-  prepareMessageForHashing
+  prepareMessageForHashing,
+  getOrCreateLibp2pKeypair
 } from '../utils.ts';
 import { paymentClient } from '../payment.ts';
 
@@ -60,7 +61,10 @@ class PayAIClient implements Client {
       const libp2pDatastore: LevelDatastore = new LevelDatastore(agentDir + '/libp2p');
       const libp2pConfig: Libp2pOptions = Object.assign({}, libp2pOptions);
       libp2pConfig.datastore = libp2pDatastore;
+      const libp2pPrivateKey = await getOrCreateLibp2pKeypair(agentDir + '/libp2p/keypair.json');
+      libp2pConfig.privateKey = libp2pPrivateKey;
       this.libp2p = await createLibp2p(libp2pConfig);
+      elizaLogger.info('libp2p PeerID: ', this.libp2p?.peerId.toString());
 
       // create ipfs instance
       const blockstore = new FsBlockstore(agentDir + '/ipfs');
@@ -124,7 +128,12 @@ class PayAIClient implements Client {
         this.setServicesConfig(localServices);
 
         // check if the service already exists in the serviceAdsDB
-        const localServiceAd = await prepareServiceAd(localServices, runtime);
+        const contactInfo = {"libp2p": this.libp2p?.peerId.toString()}
+        const twitterUsername = runtime.getSetting('TWITTER_USERNAME');
+        if (twitterUsername) {
+          contactInfo["twitter"] = `@${twitterUsername}`;
+        }
+        const localServiceAd = await prepareServiceAd(localServices, runtime, contactInfo);
         const fetchedServiceAds = await queryOrbitDbReturningCompleteEntries(
             this.serviceAdsDB,
             (doc: any) => {
@@ -141,7 +150,7 @@ class PayAIClient implements Client {
           await this.publishPreparedServiceAd(localServiceAd);
         } else {
           this.sellerServiceAdCID = getCIDFromOrbitDbHash(fetchedServiceAds[0].hash);
-          elizaLogger.info('Local services marches serviceAdsDB, no need to update the database');
+          elizaLogger.info('Local services matches serviceAdsDB, no need to update the database');
         }
       }
     }

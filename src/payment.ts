@@ -45,6 +45,7 @@ import {
     fetchContract
 } from "./generated/index.ts";
 import { fetchGlobalState } from './generated/accounts/globalState.ts';
+import { getReleasePaymentInstructionAsync } from './generated/instructions/releasePayment.ts';
 
 type RpcClient = {
     rpc: Rpc<SolanaRpcApi>;
@@ -242,6 +243,42 @@ class Payment {
         return pda as Address;
     }
 
+    /*
+     * Return the address of the escrow vault account.
+     * @returns The address of the escrow vault account.
+     */
+    getEscrowVaultAccountAddress = async (): Promise<Address> => {
+        const bytesEncoder = getBytesEncoder();
+
+        const [pda] = await getProgramDerivedAddress({
+            programAddress: PAYAI_MARKETPLACE_PROGRAM_ADDRESS as Address,
+            seeds: [
+                // "escrow_vault" as bytes
+                bytesEncoder.encode(new Uint8Array([101, 115, 99, 114, 111, 119, 95, 118, 97, 117, 108, 116]))
+            ],
+        });
+
+        return pda as Address;
+    }
+
+    /*
+     * Return the address of the platform fee vault account.
+     * @returns The address of the platform fee vault account.
+     */
+    getPlatformFeeVaultAccountAddress = async (): Promise<Address> => {
+        const bytesEncoder = getBytesEncoder();
+
+        const [pda] = await getProgramDerivedAddress({
+            programAddress: PAYAI_MARKETPLACE_PROGRAM_ADDRESS as Address,
+            seeds: [
+                // "platform_fee_vault" as bytes
+                bytesEncoder.encode(new Uint8Array([112, 108, 97, 116, 102, 111, 114, 109, 95, 102, 101, 101, 95, 118, 97, 117, 108, 116]))
+            ],
+        });
+
+        return pda as Address;
+    }
+
     /* 
      * Return the global state account.
      * @returns The global state account.
@@ -275,6 +312,13 @@ class Payment {
         return account;
     }
 
+    /*
+     * Start the contract by funding the escrow.
+     * @param cid - The IFPS CID of the Agreement.
+     * @param seller - The address of the seller.
+     * @param escrowAmount - The amount of lamports to fund the escrow.
+     * @returns The signature of the transaction.
+     */
     startContract = async (cid: string, seller: string, escrowAmount: string) => {
         elizaLogger.debug('Executing contract by funding escrow...');
 
@@ -292,7 +336,6 @@ class Payment {
         // get the contract account address
         const contractAccountAddress = await this.getContractAccountAddress(buyer, buyerContractCounter.data?.counter)
         const globalStateAddress = await this.getGlobalStateAccountAddress();
-        const globalState = await this.getGlobalStateAccount();
 
         // prepare the start contract instruction
         const startContractTx = await getStartContractInstructionAsync({
@@ -313,6 +356,37 @@ class Payment {
         );
 
         elizaLogger.info('Contract started.');
+        return signature;
+    }
+
+    /*
+     * Release the payment from the contract.
+     * @param contractAccountAddress - The address of the contract account.
+     * @param seller - The address of the seller.
+     * @returns The signature of the transaction.
+     */
+    releasePayment = async (contractAccountAddress: string, seller: string) => {
+        elizaLogger.debug('Releasing funds from contract...');
+        
+        const globalStateAddress = await this.getGlobalStateAccountAddress();
+        const platformFeeVaultAddress = await this.getPlatformFeeVaultAccountAddress();
+        
+        const releasePaymentTx = await getReleasePaymentInstructionAsync({
+            signer: this.authority,
+            contract: contractAccountAddress,
+            seller: seller as Address,
+            globalState: globalStateAddress,
+            platformFeeVault: platformFeeVaultAddress
+        });
+
+        // prepare and send the transaction
+        const signature = await pipe(
+            await this.createDefaultTransaction(),
+            (tx) => appendTransactionMessageInstruction(releasePaymentTx, tx),
+            (tx) => this.signAndSendTransaction(this.rpcClient, tx)
+        );
+
+        elizaLogger.info(`Funds released for contract ${contractAccountAddress}`);
         return signature;
     }
 

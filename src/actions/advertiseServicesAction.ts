@@ -20,6 +20,11 @@ import { prepareServiceAd, getCIDFromOrbitDbHash, queryOrbitDbReturningCompleteE
 const extractServicesTemplate = `
 Analyze the following conversation to extract the services that the user wants to sell.
 There could be multiple services, so make sure you extract all of them.
+For each service, ask the user to provide any additional details that they may need from the buyer to complete the service.
+
+The conversation is below:
+
+{{recentMessages}}
 
 Return a JSON object containing only the fields where information was clearly found.
 
@@ -30,7 +35,8 @@ For example:
         {
             "name": "Service Name",
             "description": "Service Description",
-            "price": "Service Price"
+            "price": "Service Price",
+            "requiredInfo": "Additional Details"
         }
     ]
 }
@@ -87,7 +93,7 @@ const advertiseServicesAction: Action = {
             const extractedServicesText = await generateText({
                 runtime,
                 context: extractServicesContext,
-                modelClass: ModelClass.SMALL,
+                modelClass: ModelClass.LARGE,
             });
 
             elizaLogger.debug("extracted services from generateText:", extractedServicesText);
@@ -108,7 +114,14 @@ const advertiseServicesAction: Action = {
             }
 
             // prepare the service ad
-            const serviceAd = await prepareServiceAd(extractedServices.result, runtime);
+            const contactInfo = {
+                "libp2p": payAIClient.libp2p?.peerId.toString(),
+            };
+            const twitterUsername = runtime.getSetting('TWITTER_USERNAME');
+            if (twitterUsername) {
+                contactInfo["twitter"] = `@${twitterUsername}`;
+            }
+            const serviceAd = await prepareServiceAd(extractedServices.result, runtime, contactInfo);
 
             // publish the service ad to IPFS
             const CID = await payAIClient.publishPreparedServiceAd(serviceAd);
@@ -134,10 +147,10 @@ const advertiseServicesAction: Action = {
                     },
                     embedding: getEmbeddingZeroVector()
                 };
-                await runtime.messageManager.createMemory(newMemory);
-
+                
                 // send message to the user
-                callback(newMemory.content);
+                await callback(newMemory.content);
+                await runtime.messageManager.createMemory(newMemory);
             }
 
             return true;
@@ -145,13 +158,7 @@ const advertiseServicesAction: Action = {
         } catch (error) {
             elizaLogger.error('Error in SELL_SERVICES handler:', error);
             console.error(error);
-            if (callback) {
-                callback({
-                    text: "Error processing SELL_SERVICES request.",
-                    action: "SELL_SERVICES",
-                    source: message.content.source,
-                });
-            }
+            
             return false;
         }
     },
