@@ -47,6 +47,7 @@
     "@libp2p/bootstrap": "^11.0.30",
     "@libp2p/crypto": "^5.1.1",
     "@libp2p/identify": "^3.0.25",
+    "@libp2p/mdns": "^11.0.35",
     "@libp2p/tcp": "^10.1.6",
     "@libp2p/websockets": "^9.2.6",
     "@orbitdb/core": "^2.4.3",

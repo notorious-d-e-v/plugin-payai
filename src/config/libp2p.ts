@@ -1,5 +1,6 @@
 import { identify, identifyPush } from '@libp2p/identify'
 import { bootstrap } from "@libp2p/bootstrap";
+import { mdns } from "@libp2p/mdns";
 import { tcp } from '@libp2p/tcp'
 import { webSockets } from '@libp2p/websockets'
 import { noise } from '@chainsafe/libp2p-noise'
@@ -17,6 +18,7 @@ const libp2pOptions: Libp2pOptions = {
     bootstrap({
       list: bootstrapConfig.addresses
     }),
+    mdns()
   ],
   connectionManager: {
     autoDial: true // automatically dial stored peers
