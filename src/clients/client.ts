@@ -65,6 +65,7 @@ class PayAIClient implements Client {
       libp2pConfig.privateKey = libp2pPrivateKey;
       this.libp2p = await createLibp2p(libp2pConfig);
       elizaLogger.info('libp2p PeerID: ', this.libp2p?.peerId.toString());
+      elizaLogger.info("libp2p addresses: ", this.libp2p.getMultiaddrs());
 
       // create ipfs instance
       const blockstore = new FsBlockstore(agentDir + '/ipfs');
@@ -78,30 +79,35 @@ class PayAIClient implements Client {
       this.updatesDB.events.on('update', async (entry) => {
         // what has been updated.
         elizaLogger.debug('payai updates db: ', entry.payload.value);
+        await this.restartLibp2p();
       });
 
       // open service ads database
       this.serviceAdsDB = await this.orbitdb.open(bootstrapConfig.databases.serviceAds, { sync: true });
       this.serviceAdsDB.events.on('update', async (entry) => {
         elizaLogger.debug('payai service ads db: ', entry.payload.value);
+        await this.restartLibp2p();
       });
 
       // open buy offers database
       this.buyOffersDB = await this.orbitdb.open(bootstrapConfig.databases.buyOffers, { sync: true });
       this.buyOffersDB.events.on('update', async (entry) => {
         elizaLogger.debug('payai buy offers db: ', entry.payload.value);
+        await this.restartLibp2p();
       });
 
       // open agreements database
       this.agreementsDB = await this.orbitdb.open(bootstrapConfig.databases.agreements, { sync: true });
       this.agreementsDB.events.on('update', async (entry) => {
         elizaLogger.debug('payai agreements db: ', entry.payload.value);
+        await this.restartLibp2p();
       });
 
       // open funded contracts database
       this.fundedContractsDB = await this.orbitdb.open(bootstrapConfig.databases.fundedContracts, { sync: true });
       this.fundedContractsDB.events.on('update', async (entry) => {
         elizaLogger.debug('payai funded contracts db: ', entry.payload.value);
+        await this.restartLibp2p();
       });
 
       // init seller agent checks
@@ -113,6 +119,16 @@ class PayAIClient implements Client {
       elizaLogger.error('Failed to initialize PayAI Client', error);
       throw error;
     }
+  }
+
+  /**
+   * Restarts the libp2p instance.
+   * This is hacky but unfortunately necessary at the moment for orbitdb changes to propagate.
+   */
+  private async restartLibp2p(): Promise<void> {
+    elizaLogger.info('Restarting libp2p');
+    await this.libp2p.stop();
+    await this.libp2p.start();
   }
 
     /**

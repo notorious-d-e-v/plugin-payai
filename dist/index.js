@@ -11,6 +11,7 @@ import { LevelDatastore } from "datastore-level";
 // src/config/libp2p.ts
 import { identify, identifyPush } from "@libp2p/identify";
 import { bootstrap } from "@libp2p/bootstrap";
+import { mdns } from "@libp2p/mdns";
 import { tcp } from "@libp2p/tcp";
 import { webSockets } from "@libp2p/websockets";
 import { noise } from "@chainsafe/libp2p-noise";
@@ -39,7 +40,8 @@ var libp2pOptions = {
   peerDiscovery: [
     bootstrap({
       list: bootstrap_default.addresses
-    })
+    }),
+    mdns()
   ],
   connectionManager: {
     autoDial: true
@@ -1444,28 +1446,34 @@ var PayAIClient = class {
       libp2pConfig.privateKey = libp2pPrivateKey;
       this.libp2p = await createLibp2p(libp2pConfig);
       elizaLogger2.info("libp2p PeerID: ", (_a = this.libp2p) == null ? void 0 : _a.peerId.toString());
+      elizaLogger2.info("libp2p addresses: ", this.libp2p.getMultiaddrs());
       const blockstore = new FsBlockstore(agentDir + "/ipfs");
       this.ipfs = await createHelia({ libp2p: this.libp2p, blockstore });
       this.orbitdb = await createOrbitDB({ ipfs: this.ipfs, directory: agentDir });
       this.updatesDB = await this.orbitdb.open(bootstrap_default.databases.updates, { sync: true });
       this.updatesDB.events.on("update", async (entry) => {
         elizaLogger2.debug("payai updates db: ", entry.payload.value);
+        await this.restartLibp2p();
       });
       this.serviceAdsDB = await this.orbitdb.open(bootstrap_default.databases.serviceAds, { sync: true });
       this.serviceAdsDB.events.on("update", async (entry) => {
         elizaLogger2.debug("payai service ads db: ", entry.payload.value);
+        await this.restartLibp2p();
       });
       this.buyOffersDB = await this.orbitdb.open(bootstrap_default.databases.buyOffers, { sync: true });
       this.buyOffersDB.events.on("update", async (entry) => {
         elizaLogger2.debug("payai buy offers db: ", entry.payload.value);
+        await this.restartLibp2p();
       });
       this.agreementsDB = await this.orbitdb.open(bootstrap_default.databases.agreements, { sync: true });
       this.agreementsDB.events.on("update", async (entry) => {
         elizaLogger2.debug("payai agreements db: ", entry.payload.value);
+        await this.restartLibp2p();
       });
       this.fundedContractsDB = await this.orbitdb.open(bootstrap_default.databases.fundedContracts, { sync: true });
       this.fundedContractsDB.events.on("update", async (entry) => {
         elizaLogger2.debug("payai funded contracts db: ", entry.payload.value);
+        await this.restartLibp2p();
       });
       this.servicesConfigPath = `${agentDir}/sellerServices.json`;
       await this.initSellerAgentFunctionality(runtime);
@@ -1474,6 +1482,15 @@ var PayAIClient = class {
       elizaLogger2.error("Failed to initialize PayAI Client", error);
       throw error;
     }
+  }
+  /**
+   * Restarts the libp2p instance.
+   * This is hacky but unfortunately necessary at the moment for orbitdb changes to propagate.
+   */
+  async restartLibp2p() {
+    elizaLogger2.info("Restarting libp2p");
+    await this.libp2p.stop();
+    await this.libp2p.start();
   }
   /**
    * Initializes the seller agent functionality.
