@@ -20,11 +20,8 @@ const libp2pOptions: Libp2pOptions = {
     }),
     mdns()
   ],
-  connectionManager: {
-    autoDial: true // automatically dial stored peers
-  },
   addresses: {
-    listen: ['/ip4/0.0.0.0/tcp/0', '/ip4/0.0.0.0/tcp/0/ws']
+    listen: ['/ip4/0.0.0.0/tcp/4206', '/ip4/0.0.0.0/tcp/4207/ws']
   },
   transports: [
     tcp(),
