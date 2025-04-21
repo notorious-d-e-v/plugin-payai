@@ -14,6 +14,11 @@ import bootstrapConfig from './bootstrap.json'
  * A basic Libp2p configuration for Node.js nodes.
  */
 const libp2pOptions: Libp2pOptions = {
+  peerStore: {
+    enabled: true,
+    persistence: true,
+    threshold: 1
+  },
   peerDiscovery: [
     bootstrap({
       list: bootstrapConfig.addresses

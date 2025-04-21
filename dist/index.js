@@ -37,6 +37,11 @@ var bootstrap_default = {
 
 // src/config/libp2p.ts
 var libp2pOptions = {
+  peerStore: {
+    enabled: true,
+    persistence: true,
+    threshold: 1
+  },
   peerDiscovery: [
     bootstrap({
       list: bootstrap_default.addresses
