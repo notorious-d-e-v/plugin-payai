@@ -143,6 +143,10 @@ const executeContractAction: Action = {
                 extractedDetails.result.agreementCID = cid;
             }
 
+            // remove the trailing slash from the returned CID if it exists
+            if (extractedDetails.result.agreementCID.endsWith('/')) {
+                extractedDetails.result.agreementCID = extractedDetails.result.agreementCID.slice(0, -1)
+            }
 
             // fetch the agreement from the agreementsDB
             const agreement = (await payAIClient.getEntryFromCID(extractedDetails.result.agreementCID, payAIClient.agreementsDB)).payload.value;

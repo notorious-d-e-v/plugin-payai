@@ -2355,6 +2355,13 @@ var acceptOfferAction = {
         const cid = await getCIDFromShortUrl(extractedDetails.result.buyOfferCID);
         extractedDetails.result.buyOfferCID = cid;
       }
+      if (extractedDetails.result.agreementCID.includes("ipfs.io")) {
+        const cid = await getCIDFromIpfsUrl(extractedDetails.result.buyOfferCID);
+        extractedDetails.result.buyOfferCID = cid;
+      }
+      if (extractedDetails.result.buyOfferCID.endsWith("/")) {
+        extractedDetails.result.buyOfferCID = extractedDetails.result.buyOfferCID.slice(0, -1);
+      }
       const { isValid, reason } = await isValidBuyOffer(extractedDetails.result.buyOfferCID);
       if (!isValid) {
         elizaLogger6.info(reason);
@@ -2762,6 +2769,9 @@ var executeContractAction = {
       if (extractedDetails.result.agreementCID.includes("ipfs.io")) {
         const cid = await getCIDFromIpfsUrl(extractedDetails.result.agreementCID);
         extractedDetails.result.agreementCID = cid;
+      }
+      if (extractedDetails.result.agreementCID.endsWith("/")) {
+        extractedDetails.result.agreementCID = extractedDetails.result.agreementCID.slice(0, -1);
       }
       const agreement = (await payAIClient.getEntryFromCID(extractedDetails.result.agreementCID, payAIClient.agreementsDB)).payload.value;
       const isValidAgreement = await verifyMessage(agreement.identity, agreement.signature, agreement.message);

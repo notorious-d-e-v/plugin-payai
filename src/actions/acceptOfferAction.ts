@@ -12,7 +12,7 @@ import {
     getEmbeddingZeroVector,
 } from '@elizaos/core';
 import { payAIClient } from '../clients/client.ts';
-import { getCIDFromOrbitDbHash, prepareAgreement, verifyMessage, getCIDFromShortUrl } from '../utils.ts';
+import { getCIDFromOrbitDbHash, prepareAgreement, verifyMessage, getCIDFromShortUrl, getCIDFromIpfsUrl } from '../utils.ts';
 
 interface AgreementDetails {
     buyOfferCID: string;
@@ -136,6 +136,16 @@ const acceptOfferAction: Action = {
             if (extractedDetails.result.buyOfferCID.includes("t.co")) {
                 const cid = await getCIDFromShortUrl(extractedDetails.result.buyOfferCID);
                 extractedDetails.result.buyOfferCID = cid;
+            }
+
+            if (extractedDetails.result.agreementCID.includes("ipfs.io")) {
+                const cid = await getCIDFromIpfsUrl(extractedDetails.result.buyOfferCID);
+                extractedDetails.result.buyOfferCID = cid;
+            }
+
+            // remove the trailing slash from the returned CID if it exists
+            if (extractedDetails.result.buyOfferCID.endsWith('/')) {
+                extractedDetails.result.buyOfferCID = extractedDetails.result.buyOfferCID.slice(0, -1)
             }
 
             // analyze the buy offer to determine if it is valid
